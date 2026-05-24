@@ -13,6 +13,7 @@ from app.services.ocr_service import OcrService
 logger = logging.getLogger(__name__)
 
 MIN_NATIVE_PAGE_CHARS = 40
+ALLOWED_PDF_EMBEDDED_FILES = 0
 
 
 class DocumentService:
@@ -61,6 +62,7 @@ class DocumentService:
     async def _extract_pdf_hybrid(self, content: bytes) -> str:
         doc = fitz.open(stream=content, filetype="pdf")
         try:
+            self._validate_pdf(doc)
             page_count = min(doc.page_count, self.settings.max_pages_per_document)
             page_texts: list[str | None] = []
             ocr_tasks = []
@@ -98,6 +100,20 @@ class DocumentService:
             return "\n".join(text.strip() for text in page_texts if text and text.strip()).strip()
         finally:
             doc.close()
+
+    @staticmethod
+    def _validate_pdf(doc: fitz.Document) -> None:
+        if doc.is_encrypted:
+            raise ApplicationError("PDFs criptografados não são suportados", status_code=415)
+        embedded_files = getattr(doc, "embfile_count", lambda: 0)()
+        if embedded_files > ALLOWED_PDF_EMBEDDED_FILES:
+            raise ApplicationError(
+                "PDFs com arquivos embutidos não são suportados",
+                status_code=415,
+                details={"embedded_files": embedded_files},
+            )
+        if doc.needs_pass:
+            raise ApplicationError("PDFs protegidos por senha não são suportados", status_code=415)
 
     @staticmethod
     def _is_useful_native_text(text: str) -> bool:

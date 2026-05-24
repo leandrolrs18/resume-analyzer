@@ -19,8 +19,6 @@ class SummaryResult(BaseModel):
 
 
 class RankingResult(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
     rank: int
     candidate: str
     score: float
@@ -28,11 +26,74 @@ class RankingResult(BaseModel):
     justification: str
     citations: list[Citation]
 
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "rank": 1,
+                "candidate": "Maria Silva",
+                "score": 0.93,
+                "summary": "Engenheira backend com experiência em Python, FastAPI e AWS.",
+                "justification": (
+                    "Maria Silva combina com a pergunta com base nas evidências extraídas "
+                    "sobre Python, AWS e arquitetura de APIs."
+                ),
+                "citations": [
+                    {
+                        "chunk_id": "Maria Silva-2",
+                        "text": "Desenvolvimento de APIs com Python, FastAPI, Docker e AWS.",
+                    }
+                ],
+            }
+        },
+    )
+
 
 class AnalyzeResponse(BaseModel):
     request_id: str
     query: str | None = None
     results: list[RankingResult | SummaryResult]
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "request_id": "req-001",
+                    "query": "backend Python FastAPI Docker",
+                    "results": [
+                        {
+                            "rank": 1,
+                            "candidate": "Maria Silva",
+                            "score": 0.93,
+                            "summary": "Engenheira backend com experiência em Python e AWS.",
+                            "justification": (
+                                "A candidata apresenta evidências diretas de Python, "
+                                "FastAPI e Docker."
+                            ),
+                            "citations": [
+                                {
+                                    "chunk_id": "Maria Silva-2",
+                                    "text": "APIs com Python, FastAPI, Docker e AWS.",
+                                }
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "request_id": "req-002",
+                    "query": None,
+                    "results": [
+                        {
+                            "candidate": "Joao Souza",
+                            "summary": (
+                                "Desenvolvedor full stack com experiência em React e Node.js."
+                            ),
+                        }
+                    ],
+                },
+            ]
+        }
+    )
 
 
 class HealthResponse(BaseModel):

@@ -29,7 +29,12 @@ async def test_pdf_without_native_text_falls_back_to_ocr(monkeypatch) -> None:
             return ""
 
     class FakeDoc:
+        is_encrypted = False
+        needs_pass = False
         page_count = 1
+
+        def embfile_count(self) -> int:
+            return 0
 
         def load_page(self, _: int) -> FakePage:
             return FakePage()

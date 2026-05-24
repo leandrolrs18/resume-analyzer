@@ -38,6 +38,7 @@ class ResumeAnalyzerService:
         request: Request,
         files: list[UploadFile],
         query: str | None,
+        language: str,
         request_id: str,
         user_id: str,
     ) -> AnalyzeResponse:
@@ -74,6 +75,7 @@ class ResumeAnalyzerService:
                 documents_by_candidate = {document.candidate: document for document in documents}
                 synthesized = await self.summarization_service.synthesize_ranked_results(
                     query=query,
+                    language=language,
                     evidence=evidence,
                     documents_by_candidate=documents_by_candidate,
                     max_new_tokens=self._synthesis_max_tokens(),

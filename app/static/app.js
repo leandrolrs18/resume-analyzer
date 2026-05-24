@@ -16,10 +16,10 @@ const refreshMetrics = document.querySelector("#refresh-metrics");
 const refreshLogs = document.querySelector("#refresh-logs");
 const metricsOutput = document.querySelector("#metrics-output");
 const logsOutput = document.querySelector("#logs-output");
+const languageButtons = document.querySelectorAll("[data-language]");
 let selectedFiles = [];
 let lastPayload = null;
 
-const locale = window.location.pathname.startsWith("/en") ? "en" : "pt";
 const copy = {
   pt: {
     addResumeFirst: "Anexe pelo menos um currículo e execute uma análise.",
@@ -53,7 +53,6 @@ const copy = {
     heroTitle: "Encontre os currículos mais aderentes",
     heroCopy:
       "Anexe vários currículos, faça uma pergunta de recrutamento e revise o ranking, os sumários, as justificativas e as citações retornadas pela API.",
-    featureCallout: "Resposta a queries com ranking, score, justificativas e citações",
     results: "Resultados",
     showJson: "Ver JSON",
     ragModel: "Modelo RAG",
@@ -107,7 +106,6 @@ const copy = {
     heroTitle: "Find the most relevant resumes",
     heroCopy:
       "Attach multiple resumes, ask a recruiting question, and review ranking, summaries, justifications and citations returned by the API.",
-    featureCallout: "Query responses with ranking, score, justifications and citations",
     results: "Results",
     showJson: "View JSON",
     ragModel: "RAG model",
@@ -129,17 +127,31 @@ const copy = {
     noRequestForLogs: "Run an analysis first to query /logs/{request_id}.",
     diagnosticsError: "Could not load data.",
   },
-}[locale];
+};
+
+let locale = localStorage.getItem("resumeAnalyzerLanguage") || "pt";
+if (!["pt", "en"].includes(locale)) {
+  locale = "pt";
+}
+
+function t(key) {
+  return copy[locale][key];
+}
 
 function applyLocale() {
   document.documentElement.lang = locale === "en" ? "en" : "pt-BR";
   document.title =
     locale === "en" ? "Intelligent Resume Screening" : "Triagem Inteligente de Currículos";
   document.querySelectorAll("[data-i18n]").forEach((element) => {
-    element.textContent = copy[element.dataset.i18n] || element.textContent;
+    element.textContent = t(element.dataset.i18n) || element.textContent;
   });
   document.querySelectorAll("[data-i18n-aria]").forEach((element) => {
-    element.setAttribute("aria-label", copy[element.dataset.i18nAria] || "");
+    element.setAttribute("aria-label", t(element.dataset.i18nAria) || "");
+  });
+  languageButtons.forEach((button) => {
+    const isActive = button.dataset.language === locale;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
   });
   form.elements.query.placeholder =
     locale === "en"
@@ -159,29 +171,29 @@ function relevantMetrics(text) {
 }
 
 async function loadMetrics() {
-  metricsOutput.textContent = copy.loading;
+  metricsOutput.textContent = t("loading");
   try {
     const response = await fetch("/metrics");
     const text = await response.text();
     metricsOutput.textContent = relevantMetrics(text) || text.slice(0, 4000);
   } catch {
-    metricsOutput.textContent = copy.diagnosticsError;
+    metricsOutput.textContent = t("diagnosticsError");
   }
 }
 
 async function loadLogs() {
   const id = requestIdLabel.textContent.trim();
   if (!id || id === "-") {
-    logsOutput.textContent = copy.noRequestForLogs;
+    logsOutput.textContent = t("noRequestForLogs");
     return;
   }
-  logsOutput.textContent = copy.loading;
+  logsOutput.textContent = t("loading");
   try {
     const response = await fetch(`/logs/${encodeURIComponent(id)}`);
     const payload = await response.json();
     logsOutput.textContent = JSON.stringify(payload, null, 2);
   } catch {
-    logsOutput.textContent = copy.diagnosticsError;
+    logsOutput.textContent = t("diagnosticsError");
   }
 }
 
@@ -212,7 +224,7 @@ function requestId() {
 
 function updateFileList() {
   if (!selectedFiles.length) {
-    fileList.textContent = copy.noFiles;
+    fileList.textContent = t("noFiles");
     return;
   }
   fileList.innerHTML = selectedFiles
@@ -220,7 +232,7 @@ function updateFileList() {
       (file, index) => `
         <div class="file-pill">
           <span>${escapeHtml(file.name)}</span>
-          <button type="button" class="remove-file" data-index="${index}" aria-label="${copy.remove} ${escapeHtml(file.name)}">×</button>
+          <button type="button" class="remove-file" data-index="${index}" aria-label="${t("remove")} ${escapeHtml(file.name)}">×</button>
         </div>
       `,
     )
@@ -243,16 +255,16 @@ function addFiles(files) {
 async function checkHealth() {
   try {
     const response = await fetch("/healthz");
-    apiStatus.textContent = response.ok ? copy.apiOnline : copy.apiUnstable;
+    apiStatus.textContent = response.ok ? t("apiOnline") : t("apiUnstable");
   } catch {
-    apiStatus.textContent = copy.apiOffline;
+    apiStatus.textContent = t("apiOffline");
   }
 }
 
 function renderEmpty(message) {
   results.className = "results empty-state";
   results.innerHTML = `<p>${escapeHtml(message)}</p>`;
-  resultCount.textContent = `0 ${copy.manyCandidates}`;
+  resultCount.textContent = `0 ${t("manyCandidates")}`;
 }
 
 function renderError(message) {
@@ -260,17 +272,29 @@ function renderError(message) {
   results.innerHTML = `<p>${escapeHtml(message)}</p>`;
 }
 
+function formatJustification(value, query) {
+  const escaped = escapeHtml(value);
+  if (!query) {
+    return escaped;
+  }
+  const escapedQuery = escapeHtml(query);
+  return escaped.replaceAll(
+    escapedQuery,
+    `<strong class="query-highlight">${escapedQuery}</strong>`,
+  );
+}
+
 function renderResults(payload) {
   lastPayload = payload;
   updateJsonOutput();
   const items = payload.results || [];
   resultCount.textContent = `${items.length} ${
-    items.length === 1 ? copy.oneCandidate : copy.manyCandidates
+    items.length === 1 ? t("oneCandidate") : t("manyCandidates")
   }`;
   requestIdLabel.textContent = payload.request_id || "-";
 
   if (!items.length) {
-    renderEmpty(copy.noCandidates);
+    renderEmpty(t("noCandidates"));
     return;
   }
 
@@ -279,10 +303,10 @@ function renderResults(payload) {
     .map((item) => {
       const score =
         typeof item.score === "number"
-          ? `<div class="score">${Math.round(item.score * 100)}%</div>`
+          ? `<div class="score">${Math.round(Math.min(1, Math.max(0, item.score)) * 100)}%</div>`
           : "";
       const justification = item.justification
-        ? `<p class="meta-title">${copy.justification}</p><div class="justification">${escapeHtml(item.justification)}</div>`
+        ? `<p class="meta-title">${t("justification")}</p><div class="justification">${formatJustification(item.justification, payload.query)}</div>`
         : "";
       const citations = Array.isArray(item.citations)
         ? item.citations
@@ -292,7 +316,7 @@ function renderResults(payload) {
             )
             .join("")
         : "";
-      const citationBlock = citations ? `<p class="meta-title">${copy.citations}</p>${citations}` : "";
+      const citationBlock = citations ? `<p class="meta-title">${t("citations")}</p>${citations}` : "";
 
       return `
         <article class="result-card">
@@ -300,8 +324,8 @@ function renderResults(payload) {
             <h3>${item.rank ? `${item.rank}. ` : ""}${escapeHtml(item.candidate || "Candidato")}</h3>
             ${score}
           </div>
-          <p class="meta-title">${copy.summary}</p>
-          <div class="summary">${escapeHtml(item.summary || copy.noSummary)}</div>
+          <p class="meta-title">${t("summary")}</p>
+          <div class="summary">${escapeHtml(item.summary || t("noSummary"))}</div>
           ${justification}
           ${citationBlock}
         </article>
@@ -338,7 +362,7 @@ clearButton.addEventListener("click", () => {
   updateFileList();
   latency.textContent = "-";
   requestIdLabel.textContent = "-";
-  renderEmpty(copy.addResumeFirst);
+  renderEmpty(t("addResumeFirst"));
 });
 
 jsonToggle.addEventListener("change", () => {
@@ -353,25 +377,40 @@ diagnosticsClose.addEventListener("click", closeDiagnostics);
 refreshMetrics.addEventListener("click", loadMetrics);
 refreshLogs.addEventListener("click", loadLogs);
 
+languageButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    locale = button.dataset.language;
+    localStorage.setItem("resumeAnalyzerLanguage", locale);
+    applyLocale();
+    updateFileList();
+    if (!lastPayload) {
+      renderEmpty(t("addResumeFirst"));
+    } else {
+      renderResults(lastPayload);
+    }
+  });
+});
+
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!selectedFiles.length) {
-    renderError(copy.selectFile);
+    renderError(t("selectFile"));
     return;
   }
 
   const submitButton = form.querySelector("button[type='submit']");
   submitButton.disabled = true;
-  submitButton.textContent = copy.analyzing;
+  submitButton.textContent = t("analyzing");
   lastPayload = null;
   updateJsonOutput();
-  renderEmpty(copy.process);
+  renderEmpty(t("process"));
 
   const id = requestId();
   const startedAt = performance.now();
   const data = new FormData();
   data.append("request_id", id);
   data.append("user_id", form.elements.userId.value.trim() || "recrutador-demo");
+  data.append("language", locale);
   const query = form.elements.query.value.trim();
   if (query) {
     data.append("query", query);
@@ -389,18 +428,18 @@ form.addEventListener("submit", async (event) => {
 
     const payload = await response.json();
     if (!response.ok) {
-      renderError(payload.detail || copy.apiError);
+      renderError(payload.detail || t("apiError"));
       return;
     }
     renderResults(payload);
   } catch {
-    renderError(copy.networkError);
+    renderError(t("networkError"));
   } finally {
     submitButton.disabled = false;
-    submitButton.textContent = copy.analyze;
+    submitButton.textContent = t("analyze");
   }
 });
 
 applyLocale();
-renderEmpty(copy.addResumeFirst);
+renderEmpty(t("addResumeFirst"));
 checkHealth();

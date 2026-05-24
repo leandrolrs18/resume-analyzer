@@ -1,5 +1,5 @@
 ---
-title: AI Resume Analyzer
+title: Analisador de Currículos com IA
 emoji: 📄
 colorFrom: blue
 colorTo: indigo
@@ -7,40 +7,308 @@ sdk: docker
 pinned: false
 ---
 
-# AI Resume Analyzer
+# Analisador de Currículos com IA
 
-API stateless de alta performance para análise automatizada de currículos com extração de texto nativo, suporte a OCR, inteligência artificial local e auditoria estruturada.
+## Introdução
 
----
+Este projeto é uma API stateless para triagem de currículos. A aplicação recebe múltiplos
+currículos em PDF, PNG, JPG ou JPEG, extrai texto com leitura nativa de PDF e OCR, gera sumários
+curtos e responde perguntas de recrutamento com ranking, score, justificativas e citações.
 
-## 🚀 Visão Geral
+O desenho central combina recuperação em memória com um LLM local. Em vez de salvar documentos,
+currículos ou vetores, cada requisição envia os arquivos e a pergunta ao mesmo tempo. A API
+processa tudo em tempo real, encontra as evidências mais relevantes, aciona o LLM para sintetizar
+a resposta e registra apenas logs de auditoria com metadados e resultado.
 
-Esta aplicação recebe múltiplos currículos nos formatos PDF, PNG e JPEG, realiza a extração do texto sem persistir nenhum arquivo físico e utiliza inteligência artificial local para gerar sumários executivos ou realizar o ranqueamento dos candidatos com base em critérios de recrutamento.
+## Por que triagem de currículos?
 
-### 🛡️ Garantias e Regras de Negócio
-* **Segurança e Privacidade:** Os arquivos são processados estritamente em memória e descartados após a requisição.
-* **Extração Híbrida:** Extrai o texto nativo de PDFs sempre que disponível. Faz fallback automático para OCR com Tesseract apenas em imagens ou PDFs escaneados.
-* **Alinhamento Contextual:** O modelo de IA é blindado para gerar resumos e justificativas baseando-se **apenas** nas informações reais extraídas dos documentos, mitigando alucinações.
-* **Busca Lexical Baseada em Evidências:** Utiliza o algoritmo BM25 em memória para ranquear os trechos mais relevantes frente à busca, anexando citações diretas no retorno da API.
+Times de recrutamento lidam com muitos currículos escritos em linguagem natural. Uma busca
+simples por palavras-chave costuma falhar quando candidatos descrevem experiências equivalentes
+com termos diferentes, quando as evidências aparecem fora da seção de habilidades, ou quando a
+vaga exige análise contextual.
 
----
+Este projeto busca reduzir esse problema usando recuperação sobre trechos extraídos dos
+currículos. O resultado é uma resposta mais útil para o recrutador e auditável por meio de
+citações.
 
-## 🛠️ Stack Técnica
+## Por que RAG?
 
-* **Core:** Python 3.11, FastAPI, Pydantic v2
-* **Processamento de Documentos:** PyMuPDF (extração nativa) & Tesseract OCR
-* **Inteligência Artificial:** Hugging Face Transformers / LLM GGUF local
-* **Persistência de Auditoria:** MongoDB
-* **Observabilidade:** Prometheus Metrics & JSON Structured Logging
+Arquiteturas RAG ajudam a tornar respostas de LLM mais confiáveis porque condicionam a geração em
+um contexto recuperado. Neste projeto, a recuperação acontece somente dentro da requisição atual:
 
----
+- **Extração nativa e OCR:** PDFs com texto selecionável são lidos diretamente; PDFs escaneados e
+  imagens usam OCR.
+- **Chunking em memória:** o texto extraído é dividido em trechos menores.
+- **Ranking BM25 em memória:** os trechos são ranqueados conforme a query de recrutamento.
+- **Geração baseada em evidências:** o LLM local recebe apenas as principais evidências.
+- **Citações:** cada candidato ranqueado retorna os trechos usados como base.
 
-## 🏁 Como Rodar o Projeto Localmente
+Não há banco vetorial e os arquivos enviados não são persistidos.
 
-### 1. Configurar as Variáveis de Ambiente
-Crie um arquivo `.env` na raiz do projeto com as seguintes chaves:
+## Demonstração
+
+Link da aplicação:
+
+> TODO: colar link do deploy aqui.
+
+Tela inicial:
+
+> TODO: colar print aqui.
+
+Exemplo de resposta com descrição de vaga:
+
+> TODO: colar print aqui.
+
+Exemplo de resposta com pergunta específica de recrutamento:
+
+> TODO: colar print aqui.
+
+Painel de logs e métricas:
+
+> TODO: colar print aqui.
+
+## Descrição do sistema
+
+### 1. Fluxo da requisição
+
+A API é stateless. O usuário envia currículos, `request_id`, `user_id` e uma `query` opcional na
+mesma chamada `POST /analyze`.
+
+Quando a query não é enviada, a API retorna um sumário curto por currículo. Quando a query é
+enviada, a API retorna candidatos ranqueados com score normalizado, sumário, justificativa e
+citações.
+
+```mermaid
+flowchart LR
+    A["POST /analyze<br/>files + query + request_id + user_id"] --> B["Validação<br/>tipo, tamanho e quantidade"]
+    B --> C["Extração PDF/imagem<br/>PyMuPDF + Tesseract por+eng"]
+    C --> D["Chunking em memória"]
+    D --> E["Ranking BM25 em memória"]
+    E --> F["Principais evidências"]
+    F --> G["LLM local Qwen2.5 GGUF"]
+    G --> H["Resposta<br/>ranking, score, sumário, justificativa e citações"]
+    H --> I["audit_logs<br/>metadados e resultado"]
+```
+
+### 2. Recuperação e geração
+
+O ranqueador usa uma estratégia lexical do tipo BM25. Essa escolha mantém o processamento leve e
+evita qualquer persistência de vetores. O LLM entra depois da recuperação, recebendo um prompt
+curto com as principais evidências. Caso o LLM falhe ou devolva JSON inválido, o sistema usa
+fallback extrativo para manter a resposta baseada no texto recuperado.
+
+### 3. Estratégia anti-alucinação
+
+A API reduz alucinação com as seguintes camadas:
+
+- O prompt instrui o LLM a usar somente as evidências fornecidas.
+- Justificativas são vinculadas às citações recuperadas.
+- O fallback de justificativa é extrativo.
+- Trechos com muitos dados de contato são penalizados e contatos são redigidos nas citações.
+
+Isso não é uma prova matemática contra alucinação, mas torna a resposta auditável e baseada no
+texto extraído.
+
+### 4. Segurança e privacidade
+
+- Arquivos de currículo não são salvos.
+- Vetores não são salvos.
+- Os uploads são processados em memória.
+- Os formatos aceitos são PDF, PNG, JPG e JPEG.
+- Há limites de tamanho, quantidade de arquivos e páginas por documento.
+- PDFs criptografados, protegidos por senha ou com arquivos embutidos são rejeitados.
+- A auditoria salva metadados e resultado da requisição, não os arquivos originais.
+
+## Stack técnica
+
+- **Linguagem:** Python 3.11
+- **API:** FastAPI
+- **OCR:** Tesseract OCR com pacotes de português e inglês
+- **PDF:** PyMuPDF
+- **Recuperação:** ranking BM25 em memória
+- **LLM:** Qwen2.5 GGUF local via llama.cpp
+- **Banco:** MongoDB para auditoria
+- **Métricas:** formato Prometheus
+- **Infra:** Docker e Docker Compose
+
+## API
+
+### `POST /analyze`
+
+Campos `multipart/form-data`:
+
+- `files`: um ou mais currículos PDF, PNG, JPG ou JPEG
+- `request_id`: identificador da requisição
+- `user_id`: identificador do usuário
+- `query`: pergunta ou requisito de recrutamento opcional
+
+Resposta sem `query`:
+
+```json
+{
+  "request_id": "req-001",
+  "query": null,
+  "results": [
+    {
+      "candidate": "Maria Silva",
+      "summary": "Engenheira backend com experiência em Python, FastAPI e AWS."
+    }
+  ]
+}
+```
+
+Resposta com `query`:
+
+```json
+{
+  "request_id": "req-002",
+  "query": "backend Python FastAPI Docker",
+  "results": [
+    {
+      "rank": 1,
+      "candidate": "Maria Silva",
+      "score": 0.93,
+      "summary": "Engenheira backend com experiência em Python e AWS.",
+      "justification": "A candidata apresenta evidências diretas de Python, FastAPI e Docker.",
+      "citations": [
+        {
+          "chunk_id": "Maria Silva-2",
+          "text": "APIs com Python, FastAPI, Docker e AWS."
+        }
+      ]
+    }
+  ]
+}
+```
+
+### `GET /healthz`
+
+Retorna o estado da API.
+
+### `GET /metrics`
+
+Retorna métricas no padrão Prometheus, incluindo:
+
+- `requests_total`
+- `request_latency_seconds`
+- `ocr_failures_total`
+- `llm_failures_total`
+
+### `GET /logs/{request_id}`
+
+Retorna os registros de auditoria salvos no MongoDB para uma requisição.
+
+## Instalação e execução
+
+### 1. Clonar o projeto
+
+```bash
+git clone <url-do-repositorio>
+cd teddy
+```
+
+### 2. Configurar variáveis de ambiente
+
+Crie um arquivo `.env` na raiz:
+
 ```env
 MONGO_URI=mongodb://mongodb:27017
 MONGO_DB=resume-analyzer
 USE_LOCAL_LLM=true
 LOG_LEVEL=INFO
+```
+
+### 3. Rodar com Docker Compose
+
+Para subir a API e suas dependências:
+
+```bash
+docker compose up -d --build api
+```
+
+Endereços úteis:
+
+- Frontend: `http://localhost:8000`
+- Frontend em inglês: `http://localhost:8000/en`
+- Swagger: `http://localhost:8000/docs`
+- Métricas: `http://localhost:8000/metrics`
+
+### 4. Testar com curl
+
+```bash
+curl --max-time 60 -sS \
+  -X POST http://localhost:8000/analyze \
+  -F 'request_id=req-demo-001' \
+  -F 'user_id=recrutador-demo' \
+  -F 'query=backend Python FastAPI Docker AWS' \
+  -F 'files=@/caminho/para/curriculo.pdf;type=application/pdf'
+```
+
+### 5. Consultar auditoria
+
+```bash
+curl http://localhost:8000/logs/req-demo-001
+```
+
+## Testes e qualidade
+
+Rodar testes:
+
+```bash
+.venv/bin/pytest
+```
+
+Rodar lint e checagem de formatação:
+
+```bash
+.venv/bin/ruff check app tests
+.venv/bin/black --check app tests
+```
+
+Cobertura atual de qualidade:
+
+- Testes unitários de OCR, ranking, citações, chunking, serviço de LLM e sumarização
+- Contract tests com pytest/httpx
+- Ruff
+- Black
+- Métricas verificáveis em `/metrics`
+
+## Limites
+
+Limites padrão:
+
+- Até 10 arquivos por requisição
+- Até 10 MB por arquivo
+- Até 15 páginas por documento
+- Formatos aceitos: PDF, PNG, JPG, JPEG
+
+Meta de latência:
+
+- A meta é responder em até 20 segundos para casos práticos.
+- PDFs nativos são mais rápidos do que PDFs escaneados.
+- PDFs escaneados grandes dependem do tempo de OCR.
+- No macOS, Docker executa o modelo GGUF em CPU, sem aceleração Metal.
+
+## Escalabilidade
+
+O desenho atual prioriza conformidade com o desafio e privacidade:
+
+- Processamento stateless
+- Sem persistência de arquivos
+- Sem persistência de vetores
+- Recuperação em memória
+- LLM local
+
+Evoluções naturais para produção:
+
+- Workers separados para OCR de PDFs escaneados
+- Fila para lotes pesados
+- Réplicas horizontais da API
+- MongoDB externo com política de retenção
+- Endpoint de LLM gerenciado para menor latência
+- Validação pós-geração mais rígida para reforçar anti-alucinação
+
+## Agradecimento
+
+Inspirado em pipelines RAG para triagem de currículos, adaptado para um desafio backend stateless
+em que arquivos, currículos e vetores não podem ser persistidos.

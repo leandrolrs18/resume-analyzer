@@ -5,11 +5,42 @@ from collections import Counter
 from app.schemas import Citation, RankingEvidence, ResumeDocument
 
 TOKEN_RE = re.compile(r"[a-zA-ZÀ-ÿ0-9+#.]+")
+CONTACT_RE = re.compile(
+    r"(@|\(?\d{2}\)?\s?\d?\s?\d{4}[-\s]?\d{4}|linkedin|github|portf[oó]lio|https?://)",
+    re.I,
+)
+EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+PHONE_RE = re.compile(r"\(?\d{2}\)?\s?\d?\s?\d{4}[-\s]?\d{4}")
+URL_RE = re.compile(r"https?://\S+")
 
 QUERY_EXPANSIONS = {
     "estud": {"formação", "academica", "acadêmica", "universidade", "faculdade", "curso"},
     "formacao": {"formação", "graduação", "bacharelado", "especialização", "universidade"},
     "formação": {"graduação", "bacharelado", "especialização", "universidade", "faculdade"},
+    "exper": {
+        "experiência",
+        "experience",
+        "professional",
+        "work",
+        "projects",
+        "project",
+        "developer",
+        "software",
+    },
+    "prepar": {
+        "prepared",
+        "qualified",
+        "skills",
+        "experience",
+        "professional",
+        "software",
+        "developer",
+        "projects",
+    },
+    "vaga": {"role", "position", "job", "software", "developer", "engineer"},
+    "software": {"developer", "engineer", "architecture", "arquitetura", "project"},
+    "machine": {"learning", "ml", "python", "model", "neural", "algorithms"},
+    "aprendizado": {"machine", "learning", "python", "modelos", "algoritmos"},
     "backend": {"api", "python", "django", "fastapi", "docker", "aws", "banco"},
     "python": {"django", "fastapi", "pandas", "numpy", "machine", "learning"},
 }
@@ -39,16 +70,22 @@ class RankingService:
         scored_by_candidate: dict[str, list[tuple[float, Citation]]] = {}
         for chunk, tokens in chunk_tokens:
             score = self._bm25_score(query_tokens, tokens, doc_freq, total_chunks)
+            score *= self._quality_weight(chunk.text)
             if score <= 0:
                 continue
             scored_by_candidate.setdefault(chunk.candidate, []).append(
-                (score, Citation(chunk_id=chunk.chunk_id, text=chunk.text))
+                (score, Citation(chunk_id=chunk.chunk_id, text=self._citation_text(chunk.text)))
             )
 
         evidences = []
         max_score = max(
             (
-                sum(score for score, _ in items[: self.top_k_citations])
+                sum(
+                    score
+                    for score, _ in sorted(items, key=lambda item: item[0], reverse=True)[
+                        : self.top_k_citations
+                    ]
+                )
                 for items in scored_by_candidate.values()
             ),
             default=1.0,
@@ -65,7 +102,7 @@ class RankingService:
             evidences.append(
                 RankingEvidence(
                     candidate=document.candidate,
-                    score=round(normalized_score, 4),
+                    score=round(min(1.0, max(0.0, normalized_score)), 4),
                     citations=citations,
                 )
             )
@@ -75,6 +112,29 @@ class RankingService:
     @staticmethod
     def _tokenize(text: str) -> list[str]:
         return [token.lower() for token in TOKEN_RE.findall(text)]
+
+    @staticmethod
+    def _quality_weight(text: str) -> float:
+        sentences = [part.strip() for part in re.split(r"[.;]\s+|\n+", text) if part.strip()]
+        if not sentences:
+            sentences = [text]
+        contact_lines = sum(1 for line in sentences if CONTACT_RE.search(line))
+        if contact_lines and contact_lines >= len(sentences) / 2:
+            return 0.55
+        return 1.0
+
+    @staticmethod
+    def _citation_text(text: str) -> str:
+        cleaned_lines = []
+        for line in re.split(r"[.;]\s+|\n+", text) or [text]:
+            line = URL_RE.sub("[url]", line)
+            line = EMAIL_RE.sub("[email]", line)
+            line = PHONE_RE.sub("[telefone]", line)
+            if CONTACT_RE.search(line) and len(line) < 160:
+                continue
+            cleaned_lines.append(line)
+        cleaned = " ".join(" ".join(cleaned_lines).split())
+        return cleaned[:700].rstrip()
 
     @classmethod
     def _query_tokens(cls, query: str) -> list[str]:

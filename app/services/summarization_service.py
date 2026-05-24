@@ -49,6 +49,7 @@ class SummarizationService:
     async def synthesize_ranked_results(
         self,
         query: str,
+        language: str,
         evidence: list[RankingEvidence],
         documents_by_candidate: dict[str, ResumeDocument],
         max_new_tokens: int,
@@ -59,16 +60,18 @@ class SummarizationService:
                 or self._extractive_summary(documents_by_candidate[item.candidate].extracted_text),
                 "justification": self._extractive_justification(
                     query,
+                    language,
                     item.candidate,
                     [citation.text for citation in item.citations],
                 ),
             }
             for item in evidence
         }
-        if self.llm_service is None or not evidence:
+        grounded_evidence = [item for item in evidence if item.score > 0 and item.citations]
+        if self.llm_service is None or not grounded_evidence:
             return fallback
 
-        prompt = self._ranked_prompt(query, evidence, documents_by_candidate)
+        prompt = self._ranked_prompt(query, language, grounded_evidence, documents_by_candidate)
         try:
             raw = await self.llm_service.generate(prompt, max_new_tokens)
             parsed = self._parse_json_object(raw)
@@ -91,6 +94,7 @@ class SummarizationService:
     @staticmethod
     def _ranked_prompt(
         query: str,
+        language: str,
         evidence: list[RankingEvidence],
         documents_by_candidate: dict[str, ResumeDocument],
     ) -> str:
@@ -107,9 +111,10 @@ class SummarizationService:
                 f"Evidências:\n{citations}"
             )
 
+        response_language = "inglês" if language == "en" else "português do Brasil"
         return (
             "Você é um recrutador técnico. Use somente as evidências fornecidas.\n"
-            "Responda em português do Brasil, sem inventar dados.\n"
+            f"Responda em {response_language}, sem inventar dados.\n"
             "Para cada candidato, escreva sumário e justificativa com uma frase cada.\n"
             "Retorne apenas JSON válido neste formato:\n"
             '{"candidates":[{"candidate":"nome exato","summary":"resumo curto",'
@@ -153,17 +158,29 @@ class SummarizationService:
         return "\n".join(sorted(dict.fromkeys(selected), key=lambda line: order[line]))
 
     @staticmethod
-    def _extractive_justification(query: str, candidate: str, citations: list[str]) -> str:
+    def _extractive_justification(
+        query: str, language: str, candidate: str, citations: list[str]
+    ) -> str:
         if not citations:
+            if language == "en":
+                return (
+                    f"{candidate} did not present strong evidence to answer "
+                    f"the question: {query}."
+                )
             return (
                 f"{candidate} não apresentou evidências fortes para responder "
                 f"à pergunta: {query}."
             )
-        evidence = " ".join(citation.strip() for citation in citations if citation.strip())
-        evidence = evidence[:900].rstrip()
+        evidence = " ".join(citation.strip() for citation in citations[:2] if citation.strip())
+        evidence = evidence[:520].rstrip()
+        if language == "en":
+            return (
+                f"{candidate} matches the question '{query}' based on the main "
+                f"extracted evidence: {evidence}."
+            )
         return (
             f"{candidate} combina com a pergunta '{query}' "
-            f"com base nas evidências extraídas: {evidence}."
+            f"com base nas principais evidências extraídas: {evidence}."
         )
 
     @staticmethod

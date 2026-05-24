@@ -14,6 +14,11 @@
       </div>
 
       <form id="analyze-form" class="controls">
+        <div class="language-switch" role="group" aria-label="Idioma">
+          <button type="button" id="language-pt" data-language="pt">PT</button>
+          <button type="button" id="language-en" data-language="en">EN</button>
+        </div>
+
         <label class="field">
           <span data-i18n="ragModel">Modelo RAG</span>
           <select name="ragModel">
@@ -77,11 +82,6 @@
           Anexe vários currículos, faça uma pergunta de recrutamento e revise o ranking,
           os sumários, as justificativas e as citações retornadas pela API.
         </p>
-        <div class="feature-callout">
-          <strong data-i18n="featureCallout">
-            Resposta a queries com ranking, score, justificativas e citações
-          </strong>
-        </div>
       </section>
 
       <section class="status-row" aria-live="polite">

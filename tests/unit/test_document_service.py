@@ -38,7 +38,12 @@ async def test_document_service_skips_ocr_for_native_pdf(monkeypatch) -> None:
             return "native pdf text with enough alphabetic content"
 
     class FakeDoc:
+        is_encrypted = False
+        needs_pass = False
         page_count = 1
+
+        def embfile_count(self) -> int:
+            return 0
 
         def load_page(self, _: int) -> FakePage:
             return FakePage()
@@ -74,7 +79,12 @@ async def test_document_service_uses_hybrid_pdf_extraction(monkeypatch) -> None:
             return self.text
 
     class FakeDoc:
+        is_encrypted = False
+        needs_pass = False
         page_count = 2
+
+        def embfile_count(self) -> int:
+            return 0
 
         def load_page(self, index: int) -> FakePage:
             if index == 0:
@@ -91,3 +101,24 @@ async def test_document_service_uses_hybrid_pdf_extraction(monkeypatch) -> None:
     assert "Formação em Engenharia de Software" in text
     assert "ocr page text" in text
     assert ocr.called is True
+
+
+@pytest.mark.asyncio
+async def test_document_service_rejects_pdf_with_embedded_files(monkeypatch) -> None:
+    service = DocumentService(StubOcrService(), Settings())
+
+    class FakeDoc:
+        is_encrypted = False
+        needs_pass = False
+        page_count = 1
+
+        def embfile_count(self) -> int:
+            return 1
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("app.services.document_service.fitz.open", lambda **_: FakeDoc())
+
+    with pytest.raises(Exception, match="arquivos embutidos"):
+        await service._extract_pdf(b"fake-pdf")

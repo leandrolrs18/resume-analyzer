@@ -37,6 +37,7 @@ async def test_extractive_summary_skips_contact_header() -> None:
 def test_extractive_justification_is_in_portuguese() -> None:
     justification = SummarizationService._extractive_justification(
         query="backend python",
+        language="pt",
         candidate="Maria",
         citations=["Desenvolvimento backend em Python e FastAPI."],
     )

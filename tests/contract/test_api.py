@@ -26,7 +26,12 @@ async def test_analyze_without_query_returns_summaries(client) -> None:
 @pytest.mark.asyncio
 async def test_analyze_with_query_returns_ranking(client) -> None:
     files = {"files": ("maria.pdf", io.BytesIO(b"fake"), "application/pdf")}
-    data = {"request_id": "rank-1", "user_id": "user-1", "query": "Python AWS"}
+    data = {
+        "request_id": "rank-1",
+        "user_id": "user-1",
+        "query": "Python AWS",
+        "language": "pt",
+    }
 
     response = await client.post("/analyze", files=files, data=data)
 
