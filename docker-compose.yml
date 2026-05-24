@@ -6,9 +6,8 @@ services:
     container_name: teddy-api
     restart: unless-stopped
     environment:
-      # Persistência (Logs de auditoria)
       MONGO_URI: ${MONGO_URI:-mongodb://mongodb:27017}
-      MONGO_DB: ${MONGO_DB:-teddy_resume_analyzer}
+      MONGO_DB: ${MONGO_DB:-resume-analyzer}
       
       # Configuração do LLM Rápido (Qwen2.5 GGUF)
       LLM_MODEL_PATH: "/app/models/qwen2.5-1.5b-instruct-q4_k_m.gguf"

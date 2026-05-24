@@ -7,7 +7,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     LLM_MODEL_PATH=/home/user/app/models/qwen2.5-1.5b-instruct-q4_k_m.gguf \
     HOME=/home/user
 
-# Instala dependências do sistema
+# Instala dependências do sistema: compiladores, bibliotecas de imagem e Tesseract OCR
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libgomp1 \
@@ -28,7 +28,7 @@ RUN useradd -m -u 1000 user
 USER user
 WORKDIR /home/user/app
 
-# Copia os arquivos de definição de dependências com permissão para o usuário
+# Copia os ficheiros de definição de dependências com permissão para o usuário
 COPY --chown=user pyproject.toml README.md ./
 
 RUN pip install --upgrade pip
@@ -36,7 +36,7 @@ RUN pip install --upgrade pip
 # Instala o projeto e as dependências
 RUN pip install --no-cache-dir .
 
-# Cria a pasta para o modelo e baixa o Qwen2.5 automaticamente
+# Cria a pasta para o modelo e faz o download direto do Qwen2.5-1.5B (GGUF) automaticamente
 RUN mkdir -p /home/user/app/models && \
     wget -O /home/user/app/models/qwen2.5-1.5b-instruct-q4_k_m.gguf \
     https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf
@@ -44,8 +44,10 @@ RUN mkdir -p /home/user/app/models && \
 # Copia o código da aplicação e o frontend estático
 COPY --chown=user app ./app
 
-# O Hugging Face Spaces exige EXCLUSIVAMENTE a porta 7860
+# Expõe as portas padrão de desenvolvimento e de produção da nuvem
+EXPOSE 8000
 EXPOSE 7860
 
-# Inicia o Uvicorn na porta correta exigida pela nuvem
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7860"]
+# O PULO DO GATO: Se a variável PORT existir (Hugging Face injeta 7860), ele usa.
+# Se rodar local no Mac, ele cai no fallback e usa a porta 8000 padrão do Docker Compose.
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
