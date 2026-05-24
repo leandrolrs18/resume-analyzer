@@ -31,9 +31,19 @@ WORKDIR /home/user
 RUN pip install --no-cache-dir --upgrade pip
 
 COPY --chown=user pyproject.toml ./
+COPY --chown=user README.md ./
 COPY --chown=user app ./app
 
 RUN pip install --no-cache-dir --user .
+
+RUN find /home/user/app -type d -name __pycache__ -prune -exec rm -rf {} + && \
+    python - <<'PY'
+import importlib
+
+for module in ("app.models", "app.models.schemas", "app.api.routes", "app.main"):
+    importlib.import_module(module)
+    print(f"import ok: {module}")
+PY
 
 RUN mkdir -p /home/user/models && \
     wget --tries=3 --timeout=60 -O /home/user/models/qwen2.5-1.5b-instruct-q4_k_m.gguf \
