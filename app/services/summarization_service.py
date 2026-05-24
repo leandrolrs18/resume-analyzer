@@ -1,5 +1,6 @@
 import logging
-from llama_cpp import Llama
+from typing import Any
+
 from app.schemas import ResumeDocument
 
 logger = logging.getLogger(__name__)
@@ -10,7 +11,7 @@ MAX_JUSTIFICATION_SOURCE_CHARS = 1200
 
 
 class SummarizationService:
-    def __init__(self, llm_service: Llama | None, max_new_tokens: int):
+    def __init__(self, llm_service: Any | None, max_new_tokens: int):
         self.llm_service = llm_service
         self.max_new_tokens = max_new_tokens
 
@@ -34,20 +35,17 @@ class SummarizationService:
             f"Texto do Currículo:\n{context}\n\n"
             "Resumo Estruturado:"
         )
-        
+
         prompt_final = (
             f"<|im_start|>system\nVocê é um assistente de RH especialista. Gere apenas o resumo solicitado de 5 a 8 linhas, sem introduções.<|im_end|>\n"
             f"<|im_start|>user\n{prompt}<|im_end|>\n"
             f"<|im_start|>assistant\n"
         )
-        
+
         try:
             # Executa a inferência síncrona/bloqueante na CPU de forma isolada
             response = self.llm_service(
-                prompt_final,
-                max_tokens=self.max_new_tokens,
-                temperature=0.3,
-                stop=["<|im_end|>"]
+                prompt_final, max_tokens=self.max_new_tokens, temperature=0.3, stop=["<|im_end|>"]
             )
             return response["choices"][0]["text"].strip()
         except Exception:
@@ -58,14 +56,14 @@ class SummarizationService:
         self, query: str, candidate: str, citations: list[str], max_new_tokens: int
     ) -> str:
         """
-        Sintetiza uma resposta natural e inteligente baseada exclusivamente 
+        Sintetiza uma resposta natural e inteligente baseada exclusivamente
         nas evidências reais coletadas pelo RankingService sem alucinações.
         """
         if not citations:
             return f"O candidato {candidate} não apresentou evidências explícitas no currículo para responder à pergunta: '{query}'."
 
         context = "\n\n".join(citations)[:MAX_JUSTIFICATION_SOURCE_CHARS]
-        
+
         if self.llm_service is None:
             return f"Serviço de LLM indisponível. Citações brutas: {context[:150]}..."
 
@@ -93,7 +91,7 @@ class SummarizationService:
                 prompt_final,
                 max_tokens=max_new_tokens,
                 temperature=0.1,  # Baixa temperatura para manter o modelo focado e factual
-                stop=["<|im_end|>"]
+                stop=["<|im_end|>"],
             )
             return response["choices"][0]["text"].strip()
         except Exception:

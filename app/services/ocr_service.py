@@ -35,9 +35,7 @@ class OcrService:
         prepared = self._prepare_image(image)
         best_text = ""
         for config in TESSERACT_CONFIGS:
-            text = pytesseract.image_to_string(
-                prepared, lang=self.languages, config=config
-            ).strip()
+            text = pytesseract.image_to_string(prepared, lang=self.languages, config=config).strip()
             if self._is_useful_text(text):
                 return text
             if len(text) > len(best_text):

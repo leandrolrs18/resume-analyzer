@@ -1,5 +1,6 @@
 import pytest
 from fastapi import UploadFile
+from PIL import Image
 
 from app.core.config import Settings
 from app.services.document_service import DocumentService
@@ -17,13 +18,35 @@ class StubOcrService:
         self.called = True
         return "ocr pdf text"
 
+    def render_pdf_page(self, _) -> Image.Image:
+        self.called = True
+        return Image.new("RGB", (100, 40), "white")
+
+    def _ocr_image_sync(self, _: Image.Image) -> str:
+        self.called = True
+        return "ocr page text"
+
 
 @pytest.mark.asyncio
 async def test_document_service_skips_ocr_for_native_pdf(monkeypatch) -> None:
     settings = Settings()
     ocr = StubOcrService()
     service = DocumentService(ocr, settings)
-    monkeypatch.setattr(service, "_extract_pdf_text", lambda _: "native pdf text")
+
+    class FakePage:
+        def get_text(self, _: str) -> str:
+            return "native pdf text with enough alphabetic content"
+
+    class FakeDoc:
+        page_count = 1
+
+        def load_page(self, _: int) -> FakePage:
+            return FakePage()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("app.services.document_service.fitz.open", lambda **_: FakeDoc())
     upload = UploadFile(filename="maria.pdf", file=object())
 
     async def fake_read() -> bytes:
@@ -33,5 +56,38 @@ async def test_document_service_skips_ocr_for_native_pdf(monkeypatch) -> None:
 
     document = await service._extract_single(upload)
 
-    assert document.extracted_text == "native pdf text"
+    assert document.extracted_text == "native pdf text with enough alphabetic content"
     assert ocr.called is False
+
+
+@pytest.mark.asyncio
+async def test_document_service_uses_hybrid_pdf_extraction(monkeypatch) -> None:
+    settings = Settings()
+    ocr = StubOcrService()
+    service = DocumentService(ocr, settings)
+
+    class FakePage:
+        def __init__(self, text: str):
+            self.text = text
+
+        def get_text(self, _: str) -> str:
+            return self.text
+
+    class FakeDoc:
+        page_count = 2
+
+        def load_page(self, index: int) -> FakePage:
+            if index == 0:
+                return FakePage("Formação em Engenharia de Software pela Universidade Federal")
+            return FakePage("")
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("app.services.document_service.fitz.open", lambda **_: FakeDoc())
+
+    text = await service._extract_pdf(b"fake-pdf")
+
+    assert "Formação em Engenharia de Software" in text
+    assert "ocr page text" in text
+    assert ocr.called is True

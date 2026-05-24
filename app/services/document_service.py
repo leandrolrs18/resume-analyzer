@@ -12,6 +12,8 @@ from app.services.ocr_service import OcrService
 
 logger = logging.getLogger(__name__)
 
+MIN_NATIVE_PAGE_CHARS = 40
+
 
 class DocumentService:
     def __init__(self, ocr_service: OcrService, settings: Settings):
@@ -47,27 +49,65 @@ class DocumentService:
         )
 
     async def _extract_pdf(self, content: bytes) -> str:
-        native_text = await asyncio.to_thread(self._extract_pdf_text, content)
-        if native_text.strip():
-            logger.info("native_pdf_text_detected")
-            return native_text
-        logger.info("falling_back_to_ocr_for_pdf")
-        return await self.ocr_service.extract_from_pdf_bytes(
-            content, self.settings.max_pages_per_document
-        )
-
-    def _extract_pdf_text(self, content: bytes) -> str:
-        doc = fitz.open(stream=content, filetype="pdf")
         try:
-            page_count = min(doc.page_count, self.settings.max_pages_per_document)
-            pages = [doc.load_page(index).get_text("text") for index in range(page_count)]
-            return "\n".join(page.strip() for page in pages if page.strip()).strip()
+            return await self._extract_pdf_hybrid(content)
+        except ApplicationError:
+            raise
         except Exception as exc:
             raise ApplicationError(
                 "Failed to parse PDF", status_code=400, details={"error": str(exc)}
             ) from exc
+
+    async def _extract_pdf_hybrid(self, content: bytes) -> str:
+        doc = fitz.open(stream=content, filetype="pdf")
+        try:
+            page_count = min(doc.page_count, self.settings.max_pages_per_document)
+            page_texts: list[str | None] = []
+            ocr_tasks = []
+            ocr_positions = []
+
+            for page_index in range(page_count):
+                page = doc.load_page(page_index)
+                native_text = page.get_text("text").strip()
+                if self._is_useful_native_text(native_text):
+                    page_texts.append(native_text)
+                    continue
+
+                logger.info("falling_back_to_ocr_for_pdf_page", extra={"page": page_index + 1})
+                image = self.ocr_service.render_pdf_page(page)
+                ocr_positions.append(len(page_texts))
+                page_texts.append(None)
+                ocr_tasks.append(asyncio.to_thread(self.ocr_service._ocr_image_sync, image))
+
+            if ocr_tasks:
+                try:
+                    ocr_pages = await asyncio.gather(*ocr_tasks)
+                except Exception:
+                    from app.observability.metrics import OCR_FAILURES_TOTAL
+
+                    OCR_FAILURES_TOTAL.inc()
+                    raise
+                for position, text in zip(ocr_positions, ocr_pages, strict=False):
+                    page_texts[position] = text
+
+            if not ocr_tasks:
+                logger.info("native_pdf_text_detected")
+            elif any(text for text in page_texts):
+                logger.info("hybrid_pdf_text_detected")
+
+            return "\n".join(text.strip() for text in page_texts if text and text.strip()).strip()
         finally:
             doc.close()
+
+    @staticmethod
+    def _is_useful_native_text(text: str) -> bool:
+        if len(text.strip()) < MIN_NATIVE_PAGE_CHARS:
+            return False
+        alpha_count = sum(character.isalpha() for character in text)
+        visible_count = sum(not character.isspace() for character in text)
+        if visible_count == 0:
+            return False
+        return (alpha_count / visible_count) >= 0.45
 
     @staticmethod
     def _candidate_name(filename: str) -> str:

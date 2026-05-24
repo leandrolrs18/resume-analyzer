@@ -50,6 +50,9 @@ RUN mkdir -p /home/user/models && \
     "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf?download=true"
 
 ENV LLM_MODEL_PATH=/home/user/models/qwen2.5-1.5b-instruct-q4_k_m.gguf
+ENV USE_LOCAL_LLM=true
+ENV SUMMARIZATION_MAX_NEW_TOKENS=80
+ENV JUSTIFICATION_MAX_NEW_TOKENS=80
 ENV PYTHONPATH="/home/user:/home/user/app"
 
 EXPOSE 7860
