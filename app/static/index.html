@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Teddy Triagem de Currículos</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <aside class="control-panel">
+      <div class="panel-header">
+        <p class="eyebrow">Teddy Open Finance</p>
+        <h2>Painel de Controle</h2>
+      </div>
+
+      <form id="analyze-form" class="controls">
+        <label class="field">
+          <span>Modelo RAG</span>
+          <select name="ragModel" disabled>
+            <option>RAG BM25 em memória</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>Modelo GPT</span>
+          <select name="gptModel" disabled>
+            <option>Hugging Face local</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>ID do usuário</span>
+          <input name="userId" type="text" value="recrutador-demo" />
+        </label>
+
+        <label class="field">
+          <span>Pergunta de recrutamento</span>
+          <textarea
+            name="query"
+            rows="7"
+            placeholder="Ex.: backend Python FastAPI Docker AWS..."
+          ></textarea>
+        </label>
+
+        <label class="upload-box" for="files">
+          <input id="files" name="files" type="file" accept=".pdf,.png,.jpg,.jpeg" multiple />
+          <strong>Anexar currículos</strong>
+          <span>Selecione vários arquivos PDF, PNG, JPG ou JPEG</span>
+        </label>
+
+        <div id="file-list" class="file-list">Nenhum arquivo selecionado</div>
+
+        <div class="actions">
+          <button type="submit">Analisar</button>
+          <button type="button" id="clear-button" class="secondary">Limpar</button>
+        </div>
+      </form>
+
+      <section class="panel-note">
+        <h3>Modo da requisição</h3>
+        <p>
+          Os arquivos e a pergunta são enviados juntos no POST e processados sem salvar
+          currículos, arquivos ou vetores.
+        </p>
+      </section>
+    </aside>
+
+    <main class="workspace">
+      <section class="hero">
+        <p class="eyebrow">Triagem GPT de currículos</p>
+        <h1>Encontre os currículos mais aderentes</h1>
+        <p>
+          Anexe vários currículos, faça uma pergunta de recrutamento e revise o ranking,
+          os sumários, as justificativas e as citações retornadas pela API.
+        </p>
+      </section>
+
+      <section class="status-row" aria-live="polite">
+        <div>
+          <span class="status-label">API</span>
+          <strong id="api-status">Verificando...</strong>
+        </div>
+        <div>
+          <span class="status-label">Latência</span>
+          <strong id="latency">-</strong>
+        </div>
+        <div>
+          <span class="status-label">Requisição</span>
+          <strong id="request-id">-</strong>
+        </div>
+      </section>
+
+      <section class="results-section">
+        <div class="section-title">
+          <h2>Resultados</h2>
+          <span id="result-count">0 candidatos</span>
+        </div>
+        <div id="results" class="results empty-state">
+          <p>Anexe pelo menos um currículo e execute uma análise.</p>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

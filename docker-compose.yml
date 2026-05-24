@@ -1,0 +1,43 @@
+version: "3.8"
+
+services:
+  api:
+    build: .
+    container_name: teddy-api
+    restart: unless-stopped
+    environment:
+      # Persistência (Logs de auditoria)
+      MONGO_URI: ${MONGO_URI:-mongodb://mongodb:27017}
+      MONGO_DB: ${MONGO_DB:-teddy_resume_analyzer}
+      
+      # Configuração do LLM Rápido (Qwen2.5 GGUF)
+      LLM_MODEL_PATH: "/app/models/qwen2.5-1.5b-instruct-q4_k_m.gguf"
+      USE_LOCAL_LLM: "true"
+      
+      # Limita o uso de CPU para evitar sobrecarga no host de avaliação
+      OMP_NUM_THREADS: "4"
+      OPENBLAS_NUM_THREADS: "4"
+      MKL_NUM_THREADS: "4"
+      
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "8000:8000"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+  mongodb:
+    image: mongo:7
+    container_name: teddy-mongodb
+    restart: unless-stopped
+    # tmpfs garante que os dados rodem direto na memória para máxima velocidade no teste,
+    # respeitando a regra de "Não salvar ficheiros/currículos físicos"
+    tmpfs:
+      - /data/db
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

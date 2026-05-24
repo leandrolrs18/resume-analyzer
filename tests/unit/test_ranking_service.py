@@ -1,0 +1,72 @@
+import pytest
+
+from app.models.schemas import ResumeChunk, ResumeDocument
+from app.services.ranking_service import RankingService
+
+
+@pytest.mark.asyncio
+async def test_ranking_prefers_most_similar_candidate() -> None:
+    ranking = RankingService(top_k_citations=2)
+    documents = [
+        ResumeDocument(
+            candidate="Maria",
+            source_filename="maria.pdf",
+            extracted_text="Strong Python and AWS background",
+            chunks=[
+                ResumeChunk(
+                    chunk_id="Maria-0", candidate="Maria", text="Strong Python and AWS background"
+                )
+            ],
+        ),
+        ResumeDocument(
+            candidate="Joao",
+            source_filename="joao.pdf",
+            extracted_text="React frontend experience",
+            chunks=[
+                ResumeChunk(chunk_id="Joao-0", candidate="Joao", text="React frontend experience")
+            ],
+        ),
+    ]
+
+    ranked = await ranking.rank("Python AWS", documents)
+
+    assert ranked[0].candidate == "Maria"
+    assert ranked[0].score > ranked[1].score
+    assert ranked[0].citations[0].chunk_id == "Maria-0"
+
+
+@pytest.mark.asyncio
+async def test_ranking_expands_education_question() -> None:
+    ranking = RankingService(top_k_citations=1)
+    documents = [
+        ResumeDocument(
+            candidate="Maria",
+            source_filename="maria.pdf",
+            extracted_text="Formação em Ciência da Computação pela Universidade Federal.",
+            chunks=[
+                ResumeChunk(
+                    chunk_id="Maria-0",
+                    candidate="Maria",
+                    text="Formação em Ciência da Computação pela Universidade Federal.",
+                )
+            ],
+        ),
+        ResumeDocument(
+            candidate="Joao",
+            source_filename="joao.pdf",
+            extracted_text="Experiência com React e design system.",
+            chunks=[
+                ResumeChunk(
+                    chunk_id="Joao-0",
+                    candidate="Joao",
+                    text="Experiência com React e design system.",
+                )
+            ],
+        ),
+    ]
+
+    ranked = await ranking.rank("onde estudou?", documents)
+
+    assert ranked[0].candidate == "Maria"
+    assert ranked[0].score > 0
+    assert "Universidade" in ranked[0].citations[0].text
