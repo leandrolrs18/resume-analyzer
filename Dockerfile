@@ -7,7 +7,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     LLM_MODEL_PATH=/home/user/app/models/qwen2.5-1.5b-instruct-q4_k_m.gguf \
     HOME=/home/user
 
-# Instala dependências do sistema: compiladores, bibliotecas de imagem e Tesseract OCR
+# O PULO DO GATO 1: Adiciona o caminho dos binários do usuário local no PATH do sistema
+ENV PATH="/home/user/.local/bin:${PATH}"
+
+# Instala dependências do sistema
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libgomp1 \
@@ -31,10 +34,10 @@ WORKDIR /home/user/app
 # Copia os ficheiros de definição de dependências com permissão para o usuário
 COPY --chown=user pyproject.toml README.md ./
 
-RUN pip install --upgrade pip
+RUN pip install --no-cache-dir --upgrade pip
 
-# Instala o projeto e as dependências
-RUN pip install --no-cache-dir .
+# O PULO DO GATO 2: Usa a flag "--user" para garantir que instale na pasta mapeada no PATH
+RUN pip install --no-cache-dir --user .
 
 # Cria a pasta para o modelo e faz o download direto do Qwen2.5-1.5B (GGUF) automaticamente
 RUN mkdir -p /home/user/app/models && \
@@ -48,6 +51,5 @@ COPY --chown=user app ./app
 EXPOSE 8000
 EXPOSE 7860
 
-# O PULO DO GATO: Se a variável PORT existir (Hugging Face injeta 7860), ele usa.
-# Se rodar local no Mac, ele cai no fallback e usa a porta 8000 padrão do Docker Compose.
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Executa chamando o modulo do python diretamente (garantia extra anti-erros de PATH)
+CMD ["sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
