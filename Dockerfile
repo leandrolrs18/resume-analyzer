@@ -46,13 +46,13 @@ for module in ("app.schemas", "app.api.routes", "app.main"):
 PY
 
 RUN mkdir -p /home/user/models && \
-    wget --tries=3 --timeout=60 -O /home/user/models/qwen2.5-1.5b-instruct-q4_k_m.gguf \
-    "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf?download=true"
+    wget --tries=3 --timeout=60 -O /home/user/models/qwen2.5-0.5b-instruct-q4_k_m.gguf \
+    "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf?download=true"
 
-ENV LLM_MODEL_PATH=/home/user/models/qwen2.5-1.5b-instruct-q4_k_m.gguf
+ENV LLM_MODEL_PATH=/home/user/models/qwen2.5-0.5b-instruct-q4_k_m.gguf
 ENV USE_LOCAL_LLM=true
-ENV SUMMARIZATION_MAX_NEW_TOKENS=80
-ENV JUSTIFICATION_MAX_NEW_TOKENS=80
+ENV SUMMARIZATION_MAX_NEW_TOKENS=120
+ENV JUSTIFICATION_MAX_NEW_TOKENS=120
 ENV PYTHONPATH="/home/user:/home/user/app"
 
 EXPOSE 7860

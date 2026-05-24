@@ -1,6 +1,7 @@
+from types import SimpleNamespace
+
 import pytest
 from PIL import Image
-from types import SimpleNamespace
 
 from app.core.config import Settings
 from app.services.document_service import DocumentService

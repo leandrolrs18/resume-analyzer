@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import time
 from typing import Any
 
 from app.observability.metrics import LLM_FAILURES_TOTAL
@@ -17,7 +18,7 @@ class LlmService:
         else:
             # Fallback seguro para o caminho local onde o Qwen2.5 está montado no Docker
             self.model_path = os.getenv(
-                "LLM_MODEL_PATH", "/app/models/qwen2.5-1.5b-instruct-q4_k_m.gguf"
+                "LLM_MODEL_PATH", "/home/user/models/qwen2.5-0.5b-instruct-q4_k_m.gguf"
             )
 
         self._model = None
@@ -28,6 +29,7 @@ class LlmService:
         usando a biblioteca estável llama-cpp-python.
         """
         if self._model is None:
+            started_at = time.perf_counter()
             logger.info(f"Carregando modelo Qwen GGUF centralizado a partir de: {self.model_path}")
             try:
                 from llama_cpp import Llama
@@ -42,6 +44,10 @@ class LlmService:
                 LLM_FAILURES_TOTAL.inc()
                 logger.exception("erro_critico_ao_carregar_arquivo_gguf")
                 raise
+            logger.info(
+                "llm_model_loaded",
+                extra={"latency_ms": round((time.perf_counter() - started_at) * 1000, 2)},
+            )
         return self._model
 
     def _generate_sync(self, prompt: str, max_new_tokens: int) -> str:
@@ -49,10 +55,13 @@ class LlmService:
         Executa a inferência síncrona diretamente na CPU usando o formato ChatML (Qwen2.5).
         """
         model = self._load_model()
+        started_at = time.perf_counter()
 
         # Aplica o Chat Template do Qwen2.5 para garantir que ele entenda o papel do sistema
         prompt_final = (
-            f"<|im_start|>system\nVocê é um assistente de recrutamento técnico estrito e preciso.<|im_end|>\n"
+            "<|im_start|>system\n"
+            "Você é um assistente de recrutamento técnico estrito e preciso."
+            "<|im_end|>\n"
             f"<|im_start|>user\n{prompt}<|im_end|>\n"
             f"<|im_start|>assistant\n"
         )
@@ -62,6 +71,14 @@ class LlmService:
             max_tokens=max_new_tokens,
             temperature=0.1,  # Temperatura baixa para evitar qualquer tipo de alucinação
             stop=["<|im_end|>", "<|im_start|>"],
+        )
+        logger.info(
+            "llm_generation_completed",
+            extra={
+                "latency_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                "max_new_tokens": max_new_tokens,
+                "prompt_chars": len(prompt_final),
+            },
         )
         return str(response["choices"][0]["text"]).strip()
 

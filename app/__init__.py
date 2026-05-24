@@ -1,1 +1,1 @@
-"""Teddy Open Finance resume analyzer package."""
+"""Resume analyzer package."""

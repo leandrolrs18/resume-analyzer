@@ -1,74 +1,39 @@
+import sys
 from types import SimpleNamespace
 
 from app.services.llm_service import LlmService
 
 
-def test_llm_service_loads_model_without_accelerate_only_kwargs(monkeypatch) -> None:
+def test_llm_service_loads_gguf_model_and_generates_with_chatml(monkeypatch, tmp_path) -> None:
     captured: dict[str, object] = {}
-    torch_stub = SimpleNamespace(float32="float32")
+    model_path = tmp_path / "model.gguf"
+    model_path.write_bytes(b"fake-gguf")
 
-    class DummyTokenizer:
-        pass
+    class DummyLlama:
+        def __init__(self, **kwargs):
+            captured["load_kwargs"] = kwargs
 
-    class DummyModel:
-        pass
+        def __call__(self, prompt: str, **kwargs):
+            captured["prompt"] = prompt
+            captured["generate_kwargs"] = kwargs
+            return {"choices": [{"text": '{"candidates": []}'}]}
 
-    class DummyConfig:
-        is_encoder_decoder = True
+    monkeypatch.setitem(sys.modules, "llama_cpp", SimpleNamespace(Llama=DummyLlama))
 
-    def fake_config_from_pretrained(model_name: str):
-        captured["config_model_name"] = model_name
-        return DummyConfig()
+    service = LlmService(str(model_path))
+    output = service._generate_sync("Use somente evidências.", max_new_tokens=80)
 
-    def fake_tokenizer_from_pretrained(model_name: str):
-        captured["tokenizer_model_name"] = model_name
-        return DummyTokenizer()
-
-    def fake_model_from_pretrained(model_name: str, **kwargs):
-        captured["model_name"] = model_name
-        captured["model_kwargs"] = kwargs
-        return DummyModel()
-
-    def fake_pipeline(task: str, model: object, tokenizer: object, device: int):
-        captured["pipeline_task"] = task
-        captured["pipeline_model"] = model
-        captured["pipeline_tokenizer"] = tokenizer
-        captured["pipeline_device"] = device
-        return object()
-
-    class DummyAutoConfig:
-        from_pretrained = staticmethod(fake_config_from_pretrained)
-
-    class DummyAutoCausalModel:
-        from_pretrained = staticmethod(fake_model_from_pretrained)
-
-    class DummyAutoSeq2SeqModel:
-        from_pretrained = staticmethod(fake_model_from_pretrained)
-
-    class DummyAutoTokenizer:
-        from_pretrained = staticmethod(fake_tokenizer_from_pretrained)
-
-    monkeypatch.setattr(
-        "app.services.llm_service.load_llm_dependencies",
-        lambda: (
-            torch_stub,
-            DummyAutoConfig,
-            DummyAutoCausalModel,
-            DummyAutoSeq2SeqModel,
-            DummyAutoTokenizer,
-            fake_pipeline,
-        ),
-    )
-
-    service = LlmService("test-model")
-    service._load_generator()
-
-    assert captured["config_model_name"] == "test-model"
-    assert captured["tokenizer_model_name"] == "test-model"
-    assert captured["model_name"] == "test-model"
-    assert captured["model_kwargs"] == {
-        "torch_dtype": "float32",
-        "low_cpu_mem_usage": False,
+    assert output == '{"candidates": []}'
+    assert captured["load_kwargs"] == {
+        "model_path": str(model_path),
+        "n_ctx": 2048,
+        "n_threads": 4,
+        "verbose": False,
     }
-    assert captured["pipeline_task"] == "text2text-generation"
-    assert captured["pipeline_device"] == -1
+    assert "<|im_start|>system" in str(captured["prompt"])
+    assert "Use somente evidências." in str(captured["prompt"])
+    assert captured["generate_kwargs"] == {
+        "max_tokens": 80,
+        "temperature": 0.1,
+        "stop": ["<|im_end|>", "<|im_start|>"],
+    }

@@ -26,7 +26,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     settings: Settings = get_settings()
     app = FastAPI(
-        title="Teddy Open Finance Resume Analyzer",
+        title="Resume Analyzer API",
         version="1.0.0",
         lifespan=lifespan,
     )
@@ -38,6 +38,11 @@ def create_app() -> FastAPI:
 
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:
+        return FileResponse(static_dir / "index.html")
+
+    @app.get("/en", include_in_schema=False)
+    @app.get("/en/", include_in_schema=False)
+    async def index_en() -> FileResponse:
         return FileResponse(static_dir / "index.html")
 
     app.include_router(router)

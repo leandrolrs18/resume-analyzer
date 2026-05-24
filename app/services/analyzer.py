@@ -7,9 +7,9 @@ from fastapi import Request, UploadFile
 
 from app.core.config import Settings
 from app.core.security import validate_uploads
-from app.schemas import AnalyzeResponse, RankingResult, SummaryResult
 from app.rag.chunker import TextChunker
 from app.repositories.audit_logs import AuditLogRepository
+from app.schemas import AnalyzeResponse, RankingResult, SummaryResult
 from app.services.document_service import DocumentService
 from app.services.ranking_service import RankingService
 from app.services.summarization_service import SummarizationService
@@ -46,17 +46,19 @@ class ResumeAnalyzerService:
         status = "success"
         response_payload: dict[str, Any] = {}
         try:
+            stage_started = time.perf_counter()
             documents = await self.document_service.extract_documents(files)
-            
-            # Os resumos iniciais podem continuar assíncronos se o modelo estiver desligado,
-            # mas para garantir estabilidade máxima na CPU, o ideal é processar o fluxo do LLM controlado.
+            self._log_stage("documents_extracted", stage_started, request_id)
+
+            stage_started = time.perf_counter()
             summaries = await asyncio.gather(
                 *(self.summarization_service.summarize(document) for document in documents)
             )
             for document, summary in zip(documents, summaries, strict=False):
                 document.summary = summary
                 document.chunks = self.chunker.split(document.candidate, document.extracted_text)
-            
+            self._log_stage("documents_chunked_and_summarized", stage_started, request_id)
+
             if not query:
                 results = [
                     SummaryResult(candidate=document.candidate, summary=document.summary or "")
@@ -64,40 +66,37 @@ class ResumeAnalyzerService:
                 ]
                 response = AnalyzeResponse(request_id=request_id, results=results)
             else:
-                # 1. MUDANÇA INTERNA: O ranking agora roda avaliando semanticamente via LLM e já retorna ordenativo
+                stage_started = time.perf_counter()
                 evidence = await self.ranking_service.rank(query, documents)
-                summaries = {doc.candidate: doc.summary or "" for doc in documents}
-                
-                # 2. MUDANÇA CRÍTICA: Substituído o asyncio.gather por um loop sequencial para o LLM.
-                # Como o Qwen2.5-1.5B consome muita CPU por token gerado, rodar em série evita 
-                # que o container congele e estoure a latência alvo de 20s.
-                justifications = []
-                for item in evidence:
-                    justification = await self.summarization_service.justify(
-                        query=query,
-                        candidate=item.candidate,
-                        citations=[citation.text for citation in item.citations],
-                        max_new_tokens=self.settings.justification_max_new_tokens,
-                    )
-                    justifications.append(justification)
+                self._log_stage("in_memory_ranking_completed", stage_started, request_id)
+
+                stage_started = time.perf_counter()
+                documents_by_candidate = {document.candidate: document for document in documents}
+                synthesized = await self.summarization_service.synthesize_ranked_results(
+                    query=query,
+                    evidence=evidence,
+                    documents_by_candidate=documents_by_candidate,
+                    max_new_tokens=self._synthesis_max_tokens(),
+                )
+                self._log_stage("single_llm_synthesis_completed", stage_started, request_id)
 
                 results: list[RankingResult] = []
-                for rank, (item, justification) in enumerate(
-                    zip(evidence, justifications, strict=False),
-                    start=1,
-                ):
+                for rank, item in enumerate(evidence, start=1):
+                    synthesized_item = synthesized.get(item.candidate, {})
                     results.append(
                         RankingResult(
                             rank=rank,
                             candidate=item.candidate,
                             score=round(item.score, 4),
-                            summary=summaries[item.candidate],
-                            justification=justification,
+                            summary=synthesized_item.get(
+                                "summary", documents_by_candidate[item.candidate].summary or ""
+                            ),
+                            justification=synthesized_item.get("justification", ""),
                             citations=item.citations,
                         )
                     )
                 response = AnalyzeResponse(request_id=request_id, query=query, results=results)
-            
+
             response_payload = response.model_dump(mode="json")
             return response
         except Exception:
@@ -106,8 +105,6 @@ class ResumeAnalyzerService:
         finally:
             latency_ms = round((time.perf_counter() - started_at) * 1000, 2)
             try:
-                # 3. MUDANÇA DE METADADOS: Atualizado os nomes de auditoria para o relatório do MongoDB 
-                # refletir a nova arquitetura correta do projeto pedida na avaliação.
                 await self.audit_logs.save_log(
                     request_id=request_id,
                     user_id=user_id,
@@ -116,8 +113,8 @@ class ResumeAnalyzerService:
                     latency_ms=latency_ms,
                     status=status,
                     costs={
-                        "model": "Qwen2.5-1.5B-Instruct-GGUF",
-                        "ranking": "Semantic_LLM_Scoring",
+                        "model": "Qwen2.5-0.5B-Instruct-GGUF",
+                        "ranking": "in_memory_bm25",
                         "ocr": "tesseract",
                     },
                 )
@@ -134,3 +131,20 @@ class ResumeAnalyzerService:
                     "path": request.url.path,
                 },
             )
+
+    @staticmethod
+    def _log_stage(stage: str, started_at: float, request_id: str) -> None:
+        logger.info(
+            "analysis_stage_completed",
+            extra={
+                "request_id": request_id,
+                "stage": stage,
+                "latency_ms": round((time.perf_counter() - started_at) * 1000, 2),
+            },
+        )
+
+    def _synthesis_max_tokens(self) -> int:
+        configured = (
+            self.settings.summarization_max_new_tokens + self.settings.justification_max_new_tokens
+        )
+        return min(160, configured)

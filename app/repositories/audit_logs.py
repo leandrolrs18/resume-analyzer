@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection
+
 from app.schemas import AuditLogEntry, AuditLogResponse
 
 logger = logging.getLogger(__name__)
@@ -52,7 +53,7 @@ class AuditLogRepository:
     async def get_logs(self, request_id: str) -> AuditLogResponse:
         if not self.enabled:
             return AuditLogResponse(request_id=request_id, logs=[])
-            
+
         try:
             documents = (
                 await self.collection.find({"request_id": request_id})

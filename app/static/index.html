@@ -3,38 +3,40 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Teddy Triagem de Currículos</title>
+    <title>Triagem Inteligente de Currículos</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
     <aside class="control-panel">
       <div class="panel-header">
-        <p class="eyebrow">Teddy Open Finance</p>
-        <h2>Painel de Controle</h2>
+        <p class="eyebrow" data-i18n="productEyebrow">Análise de currículos</p>
+        <h2 data-i18n="controlPanel">Painel de Controle</h2>
       </div>
 
       <form id="analyze-form" class="controls">
         <label class="field">
-          <span>Modelo RAG</span>
-          <select name="ragModel" disabled>
+          <span data-i18n="ragModel">Modelo RAG</span>
+          <select name="ragModel">
             <option>RAG BM25 em memória</option>
+            <option disabled data-i18n="singleOption">Apenas uma opção disponível</option>
           </select>
         </label>
 
         <label class="field">
-          <span>Modelo GPT</span>
-          <select name="gptModel" disabled>
-            <option>Hugging Face local</option>
+          <span data-i18n="llmModel">Modelo LLM</span>
+          <select name="llmModel">
+            <option>Qwen2.5 local via Hugging Face</option>
+            <option disabled data-i18n="singleOption">Apenas uma opção disponível</option>
           </select>
         </label>
 
         <label class="field">
-          <span>ID do usuário</span>
+          <span data-i18n="userId">ID do usuário</span>
           <input name="userId" type="text" value="recrutador-demo" />
         </label>
 
         <label class="field">
-          <span>Pergunta de recrutamento</span>
+          <span data-i18n="queryLabel">Pergunta de recrutamento</span>
           <textarea
             name="query"
             rows="7"
@@ -44,62 +46,123 @@
 
         <label class="upload-box" for="files">
           <input id="files" name="files" type="file" accept=".pdf,.png,.jpg,.jpeg" multiple />
-          <strong>Anexar currículos</strong>
-          <span>Selecione vários arquivos PDF, PNG, JPG ou JPEG</span>
+          <strong data-i18n="uploadTitle">Anexar currículos</strong>
+          <span data-i18n="uploadHelp">Selecione vários arquivos PDF, PNG, JPG ou JPEG</span>
         </label>
 
         <div id="file-list" class="file-list">Nenhum arquivo selecionado</div>
 
         <div class="actions">
-          <button type="submit">Analisar</button>
-          <button type="button" id="clear-button" class="secondary">Limpar</button>
+          <button type="submit" data-i18n="analyze">Analisar</button>
+          <button type="button" id="clear-button" class="secondary" data-i18n="clear">Limpar</button>
         </div>
       </form>
 
       <section class="panel-note">
-        <h3>Modo da requisição</h3>
+        <h3 data-i18n="requestMode">Modo da requisição</h3>
         <p>
-          Os arquivos e a pergunta são enviados juntos no POST e processados sem salvar
-          currículos, arquivos ou vetores.
+          <span data-i18n="requestModeCopy">
+            Os arquivos e a pergunta são enviados juntos no POST e processados sem salvar
+            currículos, arquivos ou vetores.
+          </span>
         </p>
       </section>
     </aside>
 
     <main class="workspace">
       <section class="hero">
-        <p class="eyebrow">Triagem GPT de currículos</p>
-        <h1>Encontre os currículos mais aderentes</h1>
-        <p>
+        <p class="eyebrow" data-i18n="heroEyebrow">Triagem com IA local</p>
+        <h1 data-i18n="heroTitle">Encontre os currículos mais aderentes</h1>
+        <p data-i18n="heroCopy">
           Anexe vários currículos, faça uma pergunta de recrutamento e revise o ranking,
           os sumários, as justificativas e as citações retornadas pela API.
         </p>
+        <div class="feature-callout">
+          <strong data-i18n="featureCallout">
+            Resposta a queries com ranking, score, justificativas e citações
+          </strong>
+        </div>
       </section>
 
       <section class="status-row" aria-live="polite">
         <div>
-          <span class="status-label">API</span>
+          <span class="status-label" data-i18n="api">API</span>
           <strong id="api-status">Verificando...</strong>
         </div>
         <div>
-          <span class="status-label">Latência</span>
+          <span class="status-label" data-i18n="latency">Latência</span>
           <strong id="latency">-</strong>
         </div>
         <div>
-          <span class="status-label">Requisição</span>
+          <span class="status-label" data-i18n="request">Requisição</span>
           <strong id="request-id">-</strong>
         </div>
       </section>
 
       <section class="results-section">
         <div class="section-title">
-          <h2>Resultados</h2>
-          <span id="result-count">0 candidatos</span>
+          <div>
+            <h2 data-i18n="results">Resultados</h2>
+            <span id="result-count">0 candidatos</span>
+          </div>
+          <label class="json-toggle">
+            <input id="json-toggle" type="checkbox" />
+            <span data-i18n="showJson">Ver JSON</span>
+          </label>
         </div>
+        <pre id="json-output" class="json-output" hidden></pre>
         <div id="results" class="results empty-state">
           <p>Anexe pelo menos um currículo e execute uma análise.</p>
         </div>
       </section>
     </main>
+
+    <button
+      type="button"
+      id="diagnostics-toggle"
+      class="diagnostics-toggle"
+      data-i18n="diagnosticsToggle"
+    >
+      Logs e métricas
+    </button>
+
+    <aside id="diagnostics-panel" class="diagnostics-panel" aria-hidden="true">
+      <div class="diagnostics-header">
+        <div>
+          <p class="eyebrow" data-i18n="diagnosticsEyebrow">Observabilidade</p>
+          <h2 data-i18n="diagnosticsTitle">Logs e métricas</h2>
+        </div>
+        <button
+          type="button"
+          id="diagnostics-close"
+          class="icon-button"
+          aria-label="Fechar painel"
+          data-i18n-aria="closeDiagnostics"
+        >
+          ×
+        </button>
+      </div>
+
+      <section class="diagnostics-block">
+        <div class="diagnostics-block-title">
+          <h3 data-i18n="metricsTitle">Métricas Prometheus</h3>
+          <button type="button" id="refresh-metrics" class="secondary small" data-i18n="refresh">
+            Atualizar
+          </button>
+        </div>
+        <pre id="metrics-output" class="diagnostics-output">-</pre>
+      </section>
+
+      <section class="diagnostics-block">
+        <div class="diagnostics-block-title">
+          <h3 data-i18n="auditTitle">Auditoria da requisição</h3>
+          <button type="button" id="refresh-logs" class="secondary small" data-i18n="refresh">
+            Atualizar
+          </button>
+        </div>
+        <pre id="logs-output" class="diagnostics-output">-</pre>
+      </section>
+    </aside>
 
     <script src="/static/app.js"></script>
   </body>
