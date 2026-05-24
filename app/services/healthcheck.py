@@ -1,4 +1,4 @@
-from app.models.schemas import HealthResponse
+from app.schemas import HealthResponse
 
 
 class HealthcheckService:

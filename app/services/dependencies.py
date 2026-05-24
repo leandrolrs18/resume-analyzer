@@ -30,6 +30,7 @@ def build_container(settings: Settings) -> Container:
     document_service = DocumentService(ocr, settings)
     summarization_service = SummarizationService(llm, settings.summarization_max_new_tokens)
     ranking_service = RankingService(settings.top_k_citations)
+    ranking_service.llm = llm
     analyzer = ResumeAnalyzerService(
         document_service=document_service,
         summarization_service=summarization_service,

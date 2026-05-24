@@ -1,6 +1,6 @@
 import pytest
 
-from app.models.schemas import ResumeChunk, ResumeDocument
+from app.schemas import ResumeChunk, ResumeDocument
 from app.services.ranking_service import RankingService
 
 

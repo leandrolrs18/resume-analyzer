@@ -7,7 +7,7 @@ from fastapi import Request, UploadFile
 
 from app.core.config import Settings
 from app.core.security import validate_uploads
-from app.models.schemas import AnalyzeResponse, RankingResult, SummaryResult
+from app.schemas import AnalyzeResponse, RankingResult, SummaryResult
 from app.rag.chunker import TextChunker
 from app.repositories.audit_logs import AuditLogRepository
 from app.services.document_service import DocumentService

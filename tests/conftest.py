@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from app.main import create_app
-from app.models.schemas import AnalyzeResponse, AuditLogEntry, AuditLogResponse, HealthResponse
+from app.schemas import AnalyzeResponse, AuditLogEntry, AuditLogResponse, HealthResponse
 from app.services.dependencies import Container
 
 

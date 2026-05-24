@@ -1,4 +1,4 @@
-from app.models.schemas import ResumeChunk
+from app.schemas import ResumeChunk
 
 
 class TextChunker:

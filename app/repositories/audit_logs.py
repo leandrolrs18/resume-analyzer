@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection
-from app.models.schemas import AuditLogEntry, AuditLogResponse
+from app.schemas import AuditLogEntry, AuditLogResponse
 
 logger = logging.getLogger(__name__)
 

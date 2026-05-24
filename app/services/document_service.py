@@ -7,7 +7,7 @@ from fastapi import UploadFile
 
 from app.core.config import Settings
 from app.core.exceptions import ApplicationError
-from app.models.schemas import ResumeDocument
+from app.schemas import ResumeDocument
 from app.services.ocr_service import OcrService
 
 logger = logging.getLogger(__name__)

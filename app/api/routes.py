@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 
-from app.models.schemas import AnalyzeResponse, AuditLogResponse, HealthResponse
+from app.schemas import AnalyzeResponse, AuditLogResponse, HealthResponse
 from app.services.dependencies import Container, get_container
 
 router = APIRouter()

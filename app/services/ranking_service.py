@@ -1,6 +1,6 @@
 import logging
 import re
-from app.models.schemas import Citation, RankingEvidence, ResumeDocument
+from app.schemas import Citation, RankingEvidence, ResumeDocument
 
 logger = logging.getLogger(__name__)
 

@@ -40,7 +40,7 @@ RUN find /home/user/app -type d -name __pycache__ -prune -exec rm -rf {} + && \
     python - <<'PY'
 import importlib
 
-for module in ("app.models", "app.models.schemas", "app.api.routes", "app.main"):
+for module in ("app.schemas", "app.api.routes", "app.main"):
     importlib.import_module(module)
     print(f"import ok: {module}")
 PY

@@ -1,6 +1,6 @@
 import pytest
 
-from app.models.schemas import ResumeDocument
+from app.schemas import ResumeDocument
 from app.services.summarization_service import SummarizationService
 
 

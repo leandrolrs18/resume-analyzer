@@ -1,6 +1,6 @@
 import logging
 from llama_cpp import Llama
-from app.models.schemas import ResumeDocument
+from app.schemas import ResumeDocument
 
 logger = logging.getLogger(__name__)
 
