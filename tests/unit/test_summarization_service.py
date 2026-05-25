@@ -1,46 +1,53 @@
 import pytest
 
-from app.schemas import ResumeDocument
+from app.schemas import Citation, RankingEvidence, ResumeDocument, ResumeStructuredProfile
 from app.services.summarization_service import SummarizationService
 
 
 @pytest.mark.asyncio
-async def test_extractive_summary_skips_contact_header() -> None:
+async def test_summary_is_short_portuguese_paragraph() -> None:
     service = SummarizationService(llm_service=None, max_new_tokens=120)
     document = ResumeDocument(
-        candidate="Leandro",
-        source_filename="cv.pdf",
-        extracted_text="""
-        Leandro Rodrigues
-        Engenheiro de Inteligência Artificial | Desenvolvedor Backend
-        Parnamirim - RN, Brasil
-        (84) 9 9841-9659
-        leandro@example.com
-        Atuação sólida em IA aplicada, NLP e sistemas backend escaláveis com Python e Django.
-        Cloud & DevOps AWS, Docker e AirFlow.
-        Experiência profissional como Desenvolvedor de IA em projeto industrial.
-        Desenvolvimento backend em Python e Django, com uso de IA em Visão Computacional.
-        Formação em Tecnologia da Informação.
-        Idiomas Português nativo e Inglês avançado.
-        """,
+        candidate="Ana",
+        source_filename="ana.pdf",
+        extracted_text="Python AWS Docker",
+        structured_profile=ResumeStructuredProfile(
+            education=["Bacharelado em Computação"],
+            experience=["Backend Developer"],
+            skills=["Python", "AWS", "Docker"],
+            projects=["API project"],
+        ),
     )
 
-    summary = await service.summarize(document)
+    summary = await service.summarize(document, language="pt")
 
-    assert "leandro@example.com" not in summary
-    assert "(84)" not in summary
-    assert "Atuação sólida" in summary
-    assert "AWS, Docker" in summary
-    assert len(summary.splitlines()) <= 6
+    assert "\n" not in summary
+    assert "formação" in summary
+    assert "Python" in summary
 
 
-def test_extractive_justification_is_in_portuguese() -> None:
-    justification = SummarizationService._extractive_justification(
+@pytest.mark.asyncio
+async def test_ranked_fallback_returns_justification() -> None:
+    service = SummarizationService(llm_service=None, max_new_tokens=120)
+    document = ResumeDocument(
+        candidate="Ana",
+        source_filename="ana.pdf",
+        extracted_text="Python AWS",
+    )
+    result = await service.synthesize_ranked_results(
         query="backend python",
         language="pt",
-        candidate="Maria",
-        citations=["Desenvolvimento backend em Python e FastAPI."],
+        llm_provider="local",
+        evidence=[
+            RankingEvidence(
+                candidate="Ana",
+                score=1,
+                citations=[Citation(chunk_id="1", text="Python AWS backend")],
+            )
+        ],
+        documents_by_candidate={"Ana": document},
+        max_new_tokens=120,
     )
 
-    assert "combina com a pergunta" in justification
-    assert "evidências extraídas" in justification
+    assert "Ana" in result
+    assert "foi ranqueado" in result["Ana"]["justification"]

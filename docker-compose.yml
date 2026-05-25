@@ -8,6 +8,8 @@ services:
       MONGO_DB: ${MONGO_DB:-resume-analyzer}
       
       USE_LOCAL_LLM: "true"
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
       
       # Limita o uso de CPU para evitar sobrecarga no host de avaliação
       OMP_NUM_THREADS: "4"

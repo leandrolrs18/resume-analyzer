@@ -13,7 +13,9 @@ router = APIRouter()
     description=(
         "Recebe currículos PDF/JPEG/PNG, request_id, user_id e uma query opcional. "
         "O processamento é stateless: arquivos e vetores não são persistidos. "
-        "Sem query, retorna sumários; com query, retorna ranking, score, justificativas e citações."
+        "Sem query, retorna sumários; com query, retorna ranking, score, justificativas "
+        "e citações. "
+        "O ranking pode usar BM25, embeddings em memória ou modo híbrido."
     ),
     response_description="Resultado da análise dos currículos",
     openapi_extra={
@@ -27,6 +29,8 @@ router = APIRouter()
                                 "request_id": "req-001",
                                 "user_id": "recrutador-demo",
                                 "query": "backend Python FastAPI Docker AWS",
+                                "retrieval_mode": "hybrid",
+                                "llm_provider": "groq",
                                 "files": ["maria.pdf", "joao.png"],
                             },
                         },
@@ -49,6 +53,8 @@ async def analyze_resumes(
     files: list[UploadFile] = File(...),
     query: str | None = Form(default=None),
     language: str | None = Form(default="pt"),
+    llm_provider: str | None = Form(default="local"),
+    retrieval_mode: str | None = Form(default="hybrid"),
     request_id: str = Form(...),
     user_id: str = Form(...),
     container: Container = Depends(get_container),
@@ -58,6 +64,8 @@ async def analyze_resumes(
         files=files,
         query=query,
         language=language or "pt",
+        llm_provider=llm_provider or "local",
+        retrieval_mode=retrieval_mode or "hybrid",
         request_id=request_id,
         user_id=user_id,
     )

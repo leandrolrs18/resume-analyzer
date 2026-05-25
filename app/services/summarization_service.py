@@ -1,200 +1,172 @@
-import json
 import logging
-import re
 from typing import Any
 
 from app.schemas import RankingEvidence, ResumeDocument
 
 logger = logging.getLogger(__name__)
 
-MAX_SUMMARY_SOURCE_CHARS = 3500
-SUMMARY_LINES = 6
-CONTACT_RE = re.compile(r"(@|\(?\d{2}\)?\s?\d?\s?\d{4}[-\s]?\d{4}|linkedin|github)", re.I)
-ROLE_TERMS = {
-    "analista",
-    "backend",
-    "cientista",
-    "dados",
-    "desenvolvedor",
-    "developer",
-    "engineer",
-    "engenheiro",
-    "full stack",
-    "inteligência artificial",
-    "software",
-}
-SUMMARY_TERMS = {
-    "api",
-    "aws",
-    "backend",
-    "cloud",
-    "docker",
-    "experiência",
-    "formação",
-    "ia",
-    "machine learning",
-    "python",
-    "tecnologias",
-}
-
 
 class SummarizationService:
-    def __init__(self, llm_service: Any | None, max_new_tokens: int):
+    def __init__(
+        self, llm_service: Any | None, max_new_tokens: int, groq_service: Any | None = None
+    ):
         self.llm_service = llm_service
+        self.groq_service = groq_service
         self.max_new_tokens = max_new_tokens
 
-    async def summarize(self, document: ResumeDocument) -> str:
-        return self._extractive_summary(document.extracted_text[:MAX_SUMMARY_SOURCE_CHARS])
+    async def summarize(self, document: ResumeDocument, language: str = "pt") -> str:
+        return self._fallback_summary(document, language, [])
 
     async def synthesize_ranked_results(
         self,
         query: str,
         language: str,
+        llm_provider: str,
         evidence: list[RankingEvidence],
         documents_by_candidate: dict[str, ResumeDocument],
         max_new_tokens: int,
     ) -> dict[str, dict[str, str]]:
         fallback = {
             item.candidate: {
-                "summary": documents_by_candidate[item.candidate].summary
-                or self._extractive_summary(documents_by_candidate[item.candidate].extracted_text),
-                "justification": self._extractive_justification(
-                    query,
+                "summary": self._fallback_summary(
+                    documents_by_candidate[item.candidate],
                     language,
-                    item.candidate,
                     [citation.text for citation in item.citations],
                 ),
+                "justification": self._fallback_justification(query, language, item),
             }
             for item in evidence
         }
-        grounded_evidence = [item for item in evidence if item.score > 0 and item.citations]
-        if self.llm_service is None or not grounded_evidence:
+
+        llm = self._llm(llm_provider)
+        grounded = [item for item in evidence if item.score > 0 and item.citations]
+        if not llm or not grounded:
             return fallback
 
-        prompt = self._ranked_prompt(query, language, grounded_evidence, documents_by_candidate)
         try:
-            raw = await self.llm_service.generate(prompt, max_new_tokens)
-            parsed = self._parse_json_object(raw)
-            candidates = parsed.get("candidates", [])
-            for item in candidates:
-                candidate = str(item.get("candidate", "")).strip()
+            parsed = self._blocks(
+                await llm.generate(self._prompt(query, language, grounded), max_new_tokens)
+            )
+            for candidate, item in parsed.items():
                 if candidate not in fallback:
                     continue
-                summary = str(item.get("summary", "")).strip()
-                justification = str(item.get("justification", "")).strip()
-                if summary:
+                summary = item.get("summary", "").strip()
+                if self._valid_summary(summary):
                     fallback[candidate]["summary"] = summary
-                if justification:
-                    fallback[candidate]["justification"] = justification
-            return fallback
         except Exception:
             logger.exception("single_llm_synthesis_failed")
-            return fallback
+        return fallback
+
+    def _llm(self, provider: str):
+        if provider == "groq" and self.groq_service:
+            return self.groq_service
+        return self.llm_service
 
     @staticmethod
-    def _ranked_prompt(
-        query: str,
+    def _prompt(query: str, language: str, evidence: list[RankingEvidence]) -> str:
+        lang = "inglês" if language == "en" else "português do Brasil"
+        blocks = []
+        for item in evidence[:2]:
+            citations = "\n".join(f"- {citation.text[:220]}" for citation in item.citations[:2])
+            blocks.append(f"Candidato: {item.candidate}\nEvidências:\n{citations}")
+        return (
+            f"Responda em {lang}. Use somente as evidências abaixo, sem inventar dados. "
+            "Para cada candidato, retorne exatamente este formato, sem JSON e sem markdown:\n"
+            "CANDIDATO: nome\n"
+            "RESUMO: um parágrafo corrido com 3 frases curtas\n"
+            "JUSTIFICATIVA: 1 frase objetiva ligada à pergunta\n"
+            "FIM\n\n"
+            f"Pergunta: {query}\n\n" + "\n\n".join(blocks)
+        )
+
+    @staticmethod
+    def _blocks(raw: str) -> dict[str, dict[str, str]]:
+        parsed: dict[str, dict[str, str]] = {}
+        current: str | None = None
+        for line in raw.splitlines():
+            line = line.strip()
+            if line.upper().startswith("CANDIDATO:"):
+                current = line.split(":", maxsplit=1)[1].strip()
+                parsed[current] = {"summary": "", "justification": ""}
+            elif current and line.upper().startswith("RESUMO:"):
+                parsed[current]["summary"] = line.split(":", maxsplit=1)[1].strip()
+            elif current and line.upper().startswith("JUSTIFICATIVA:"):
+                parsed[current]["justification"] = line.split(":", maxsplit=1)[1].strip()
+        if not parsed:
+            raise ValueError("LLM did not return candidate blocks")
+        return parsed
+
+    @classmethod
+    def _fallback_summary(
+        cls,
+        document: ResumeDocument,
         language: str,
-        evidence: list[RankingEvidence],
-        documents_by_candidate: dict[str, ResumeDocument],
+        citations: list[str],
     ) -> str:
-        candidates = []
-        for rank, item in enumerate(evidence[:3], start=1):
-            document = documents_by_candidate[item.candidate]
-            citations = "\n".join(f"- {citation.text[:450]}" for citation in item.citations[:2])
-            fallback_summary = document.summary or ""
-            candidates.append(
-                f"Rank {rank}\n"
-                f"Candidato: {item.candidate}\n"
-                f"Score: {item.score}\n"
-                f"Resumo-base: {fallback_summary[:500]}\n"
-                f"Evidências:\n{citations}"
-            )
-
-        response_language = "inglês" if language == "en" else "português do Brasil"
-        return (
-            "Você é um recrutador técnico. Use somente as evidências fornecidas.\n"
-            f"Responda em {response_language}, sem inventar dados.\n"
-            "Para cada candidato, escreva sumário e justificativa com uma frase cada.\n"
-            "Retorne apenas JSON válido neste formato:\n"
-            '{"candidates":[{"candidate":"nome exato","summary":"resumo curto",'
-            '"justification":"justificativa objetiva"}]}\n\n'
-            f"Pergunta: {query}\n\n"
-            "Candidatos e evidências:\n"
-            f"{chr(10).join(candidates)}"
-        )
-
-    @staticmethod
-    def _parse_json_object(raw: str) -> dict[str, Any]:
-        text = raw.strip()
-        start = text.find("{")
-        end = text.rfind("}")
-        if start == -1 or end == -1 or end <= start:
-            raise ValueError("LLM did not return a JSON object")
-        return json.loads(text[start : end + 1])
-
-    @staticmethod
-    def _extractive_summary(text: str) -> str:
-        candidates = []
-        for index, line in enumerate(
-            SummarizationService._clean_line(line) for line in text.splitlines()
-        ):
-            if not line or CONTACT_RE.search(line):
-                continue
-            score = SummarizationService._summary_score(line)
-            if score > 0:
-                candidates.append((score, index, line))
-        if not candidates:
-            clean = [SummarizationService._clean_line(line) for line in text.splitlines()]
-            clean = [line for line in clean if line and not CONTACT_RE.search(line)]
-            return "\n".join(clean[:SUMMARY_LINES]) or "Texto insuficiente para gerar sumário."
-        selected = [
-            line
-            for _, _, line in sorted(candidates, key=lambda item: (-item[0], item[1]))[
-                :SUMMARY_LINES
-            ]
-        ]
-        order = {line: index for _, index, line in candidates}
-        return "\n".join(sorted(dict.fromkeys(selected), key=lambda line: order[line]))
-
-    @staticmethod
-    def _extractive_justification(
-        query: str, language: str, candidate: str, citations: list[str]
-    ) -> str:
-        if not citations:
-            if language == "en":
-                return (
-                    f"{candidate} did not present strong evidence to answer "
-                    f"the question: {query}."
-                )
-            return (
-                f"{candidate} não apresentou evidências fortes para responder "
-                f"à pergunta: {query}."
-            )
-        evidence = " ".join(citation.strip() for citation in citations[:2] if citation.strip())
-        evidence = evidence[:520].rstrip()
+        profile = document.structured_profile
+        skills = profile.skills if profile else []
         if language == "en":
+            education_text = cls._sample(profile.education if profile else [], "education")
+            experience_text = cls._sample(profile.experience if profile else [], "work")
+            project_text = cls._sample(profile.projects if profile else [], "the resume")
             return (
-                f"{candidate} matches the question '{query}' based on the main "
-                f"extracted evidence: {evidence}."
+                f"{document.candidate} has academic evidence in "
+                f"{education_text} and professional experience in {experience_text}. "
+                f"The extracted skills include {cls._join(skills[:6], 'en')}. "
+                f"Relevant projects or activities include {project_text}."
             )
+        education_text = cls._sample(profile.education if profile else [], "trechos extraídos")
+        experience_text = cls._sample(
+            profile.experience if profile else [], "atividades profissionais"
+        )
+        project_text = cls._sample(profile.projects if profile else [], "evidências do currículo")
         return (
-            f"{candidate} combina com a pergunta '{query}' "
-            f"com base nas principais evidências extraídas: {evidence}."
+            f"{document.candidate} apresenta formação em {education_text} e "
+            f"experiência em {experience_text}. "
+            f"As competências extraídas incluem {cls._join(skills[:6], 'pt')}. "
+            f"Projetos ou atividades relevantes aparecem em {project_text}."
+        )
+
+    @classmethod
+    def _fallback_justification(cls, query: str, language: str, item: RankingEvidence) -> str:
+        if not item.citations:
+            if language == "en":
+                return f"{item.candidate} did not show strong evidence for the question: {query}."
+            return f"{item.candidate} não apresentou evidências fortes para a pergunta: {query}."
+        if language == "en":
+            citation_text = cls._sample(
+                [citation.text for citation in item.citations], "relevant evidence"
+            )
+            return (
+                f"{item.candidate} was ranked for '{query}' because the retrieved citations "
+                f"mention {citation_text}."
+            )
+        citation_text = cls._sample(
+            [citation.text for citation in item.citations], "evidências relevantes"
+        )
+        return (
+            f"{item.candidate} foi ranqueado para '{query}' porque as citações recuperadas "
+            f"mencionam {citation_text}."
         )
 
     @staticmethod
-    def _clean_line(line: str) -> str:
-        return " ".join(line.replace("●", "").replace("\u200b", " ").split())
+    def _level(count: int, language: str) -> str:
+        if language == "en":
+            return "strong" if count >= 3 else "moderate" if count else "limited"
+        return "forte" if count >= 3 else "moderada" if count else "limitada"
 
     @staticmethod
-    def _summary_score(line: str) -> int:
-        normalized = line.lower()
-        score = 0
-        score += sum(3 for term in ROLE_TERMS if term in normalized)
-        score += sum(2 for term in SUMMARY_TERMS if term in normalized)
-        if re.search(r"\b(20\d{2}|19\d{2})\b", line):
-            score += 1
-        if 35 <= len(line) <= 280:
-            score += 1
-        return score
+    def _join(values: list[str], language: str) -> str:
+        values = values or (["limited signals"] if language == "en" else ["sinais limitados"])
+        if len(values) == 1:
+            return values[0]
+        return f"{', '.join(values[:-1])}{' and ' if language == 'en' else ' e '}{values[-1]}"
+
+    @staticmethod
+    def _sample(values: list[str], fallback: str) -> str:
+        clean = [" ".join(value.split())[:120] for value in values if value.strip()]
+        return "; ".join(clean[:2]) if clean else fallback
+
+    @staticmethod
+    def _valid_summary(value: str) -> bool:
+        return len(value) >= 120 and sum(value.count(char) for char in ".!?") >= 2

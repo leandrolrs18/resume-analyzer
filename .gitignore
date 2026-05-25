@@ -1,5 +1,7 @@
 models/
 *.gguf
+.env
+.coverage
 __pycache__/
 *.pyc
 .pytest_cache/

@@ -45,7 +45,7 @@ class FakeAnalyzer:
         self.last_query = None
 
     async def analyze(
-        self, request, files, query, language, request_id, user_id
+        self, request, files, query, language, llm_provider, retrieval_mode, request_id, user_id
     ) -> AnalyzeResponse:
         self.last_query = query
         if query:

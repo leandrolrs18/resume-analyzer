@@ -38,8 +38,13 @@ um contexto recuperado. Neste projeto, a recuperação acontece somente dentro d
 
 - **Extração nativa e OCR:** PDFs com texto selecionável são lidos diretamente; PDFs escaneados e
   imagens usam OCR.
-- **Chunking em memória:** o texto extraído é dividido em trechos menores.
-- **Ranking BM25 em memória:** os trechos são ranqueados conforme a query de recrutamento.
+- **Parsing estruturado em memória:** um section splitter simples, com spaCy NER para nome quando
+  disponível, separa formação, experiência, skills, certificações, projetos e idiomas em um JSON
+  canônico temporário.
+- **Views semânticas:** o JSON estruturado gera representações textuais específicas para busca.
+- **Chunking em memória:** o texto bruto e as views estruturadas são divididos em trechos menores.
+- **Recuperação em memória:** os trechos podem ser ranqueados por BM25, embeddings em memória
+  ou modo híbrido.
 - **Geração baseada em evidências:** o LLM local recebe apenas as principais evidências.
 - **Citações:** cada candidato ranqueado retorna os trechos usados como base.
 
@@ -82,20 +87,30 @@ citações.
 flowchart LR
     A["POST /analyze<br/>files + query + request_id + user_id"] --> B["Validação<br/>tipo, tamanho e quantidade"]
     B --> C["Extração PDF/imagem<br/>PyMuPDF + Tesseract por+eng"]
-    C --> D["Chunking em memória"]
-    D --> E["Ranking BM25 em memória"]
-    E --> F["Principais evidências"]
-    F --> G["LLM local Qwen2.5 GGUF"]
-    G --> H["Resposta<br/>ranking, score, sumário, justificativa e citações"]
-    H --> I["audit_logs<br/>metadados e resultado"]
+    C --> D["Section splitter + spaCy NER<br/>JSON simples em memória"]
+    D --> E["Views semânticas<br/>perfil, formação, experiência, skills"]
+    E --> F["Chunking em memória<br/>texto bruto + views"]
+    F --> G["Ranking BM25 / embeddings<br/>em memória"]
+    G --> H["Principais evidências"]
+    H --> I["LLM final<br/>Qwen local ou Groq"]
+    I --> J["Resposta<br/>ranking, score, sumário, justificativa e citações"]
+    J --> K["audit_logs<br/>metadados e resultado"]
 ```
 
 ### 2. Recuperação e geração
 
-O ranqueador usa uma estratégia lexical do tipo BM25. Essa escolha mantém o processamento leve e
-evita qualquer persistência de vetores. O LLM entra depois da recuperação, recebendo um prompt
-curto com as principais evidências. Caso o LLM falhe ou devolva JSON inválido, o sistema usa
-fallback extrativo para manter a resposta baseada no texto recuperado.
+Antes do ranking, o parser cria um JSON simples em memória com campos como `education`,
+`experience`, `skills`, `certifications`, `projects` e `languages`. Ele usa títulos de seção em
+português e inglês, e spaCy NER apenas para apoiar a identificação de nome quando o modelo está
+instalado. Esse JSON não é persistido; ele serve para gerar views semânticas, por exemplo
+"formação", "competências" e "experiência".
+
+O ranqueador pode operar em três modos: `bm25`, `embedding` ou `hybrid`. O modo híbrido combina
+BM25, que preserva termos literais como tecnologias, instituições e certificações, com embeddings
+em memória, que melhoram perguntas abertas e semânticas. Os vetores são criados somente durante a
+requisição e não são persistidos. O LLM entra depois da recuperação, recebendo um prompt curto com
+as principais evidências. Caso o LLM falhe ou devolva JSON inválido, o sistema usa fallback baseado
+no texto recuperado.
 
 ### 3. Estratégia anti-alucinação
 
@@ -125,7 +140,7 @@ texto extraído.
 - **API:** FastAPI
 - **OCR:** Tesseract OCR com pacotes de português e inglês
 - **PDF:** PyMuPDF
-- **Recuperação:** ranking BM25 em memória
+- **Recuperação:** BM25, embeddings em memória ou modo híbrido
 - **LLM:** Qwen2.5 GGUF local via llama.cpp
 - **Banco:** MongoDB para auditoria
 - **Métricas:** formato Prometheus
@@ -216,7 +231,16 @@ MONGO_URI=mongodb://mongodb:27017
 MONGO_DB=resume-analyzer
 USE_LOCAL_LLM=true
 LOG_LEVEL=INFO
+GROQ_API_KEY=
+GROQ_MODEL=llama-3.3-70b-versatile
 ```
+
+`GROQ_API_KEY` é opcional. Quando configurada, o front permite usar a opção
+`Groq Llama 3.3 70B`; quando ausente, o sistema continua funcionando com o modelo local.
+Não coloque chaves reais no repositório.
+
+Ao selecionar Groq, somente as evidências ranqueadas e a pergunta são enviadas para a
+API externa de LLM. Para execução 100% privada dentro do container, use o modelo local.
 
 ### 3. Rodar com Docker Compose
 

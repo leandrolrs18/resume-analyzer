@@ -31,6 +31,8 @@ async def test_analyze_with_query_returns_ranking(client) -> None:
         "user_id": "user-1",
         "query": "Python AWS",
         "language": "pt",
+        "llm_provider": "local",
+        "retrieval_mode": "hybrid",
     }
 
     response = await client.post("/analyze", files=files, data=data)

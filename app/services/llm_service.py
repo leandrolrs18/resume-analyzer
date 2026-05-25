@@ -1,12 +1,17 @@
 import asyncio
+import json
 import logging
 import os
 import time
+import urllib.error
+import urllib.request
 from typing import Any
 
 from app.observability.metrics import LLM_FAILURES_TOTAL
 
 logger = logging.getLogger(__name__)
+
+GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 
 class LlmService:
@@ -107,3 +112,59 @@ class LlmService:
             prompt, max_tokens=max_tokens, temperature=temperature, stop=stop or ["<|im_end|>"]
         )
         return raw_response
+
+
+class GroqLlmService:
+    def __init__(self, api_key: str, model: str):
+        self.api_key = api_key
+        self.model = model
+
+    def _generate_sync(self, prompt: str, max_new_tokens: int) -> str:
+        if not self.api_key:
+            raise RuntimeError("GROQ_API_KEY não configurada")
+
+        started_at = time.perf_counter()
+        payload = {
+            "model": self.model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "Você é um assistente de recrutamento técnico estrito e preciso.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.1,
+            "max_tokens": max_new_tokens,
+        }
+        request = urllib.request.Request(
+            GROQ_CHAT_COMPLETIONS_URL,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+            raise
+
+        logger.info(
+            "groq_generation_completed",
+            extra={
+                "latency_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                "max_new_tokens": max_new_tokens,
+                "model": self.model,
+            },
+        )
+        return str(data["choices"][0]["message"]["content"]).strip()
+
+    async def generate(self, prompt: str, max_new_tokens: int) -> str:
+        try:
+            return await asyncio.to_thread(self._generate_sync, prompt, max_new_tokens)
+        except Exception:
+            LLM_FAILURES_TOTAL.inc()
+            logger.exception("groq_generation_failed")
+            raise

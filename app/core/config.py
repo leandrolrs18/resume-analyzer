@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     mongo_db: str = Field(default="resume-analyzer")
     hf_model: str = Field(default="google/flan-t5-small")
     use_local_llm: bool = Field(default=False)
+    groq_api_key: str = Field(default="")
+    groq_model: str = Field(default="llama-3.3-70b-versatile")
     log_level: str = Field(default="INFO")
     max_upload_size_bytes: int = Field(default=10 * 1024 * 1024)
     max_files: int = Field(default=10)

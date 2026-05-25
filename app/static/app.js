@@ -16,7 +16,7 @@ const refreshMetrics = document.querySelector("#refresh-metrics");
 const refreshLogs = document.querySelector("#refresh-logs");
 const metricsOutput = document.querySelector("#metrics-output");
 const logsOutput = document.querySelector("#logs-output");
-const languageButtons = document.querySelectorAll("[data-language]");
+const languageToggle = document.querySelector("#language-toggle");
 let selectedFiles = [];
 let lastPayload = null;
 
@@ -56,6 +56,9 @@ const copy = {
     results: "Resultados",
     showJson: "Ver JSON",
     ragModel: "Modelo RAG",
+    retrievalHybrid: "Híbrido: BM25 + embeddings",
+    retrievalEmbedding: "Embeddings em memória",
+    retrievalBm25: "BM25 em memória",
     llmModel: "Modelo LLM",
     singleOption: "Apenas uma opção disponível",
     userId: "ID do usuário",
@@ -109,6 +112,9 @@ const copy = {
     results: "Results",
     showJson: "View JSON",
     ragModel: "RAG model",
+    retrievalHybrid: "Hybrid: BM25 + embeddings",
+    retrievalEmbedding: "In-memory embeddings",
+    retrievalBm25: "In-memory BM25",
     llmModel: "LLM model",
     singleOption: "Only one option available",
     userId: "User ID",
@@ -148,11 +154,11 @@ function applyLocale() {
   document.querySelectorAll("[data-i18n-aria]").forEach((element) => {
     element.setAttribute("aria-label", t(element.dataset.i18nAria) || "");
   });
-  languageButtons.forEach((button) => {
-    const isActive = button.dataset.language === locale;
-    button.classList.toggle("is-active", isActive);
-    button.setAttribute("aria-pressed", String(isActive));
-  });
+  languageToggle.textContent = locale === "en" ? "PT" : "EN";
+  languageToggle.setAttribute(
+    "aria-label",
+    locale === "en" ? "Mudar para português" : "Switch to English",
+  );
   form.elements.query.placeholder =
     locale === "en"
       ? "E.g.: backend Python FastAPI Docker AWS..."
@@ -377,18 +383,16 @@ diagnosticsClose.addEventListener("click", closeDiagnostics);
 refreshMetrics.addEventListener("click", loadMetrics);
 refreshLogs.addEventListener("click", loadLogs);
 
-languageButtons.forEach((button) => {
-  button.addEventListener("click", () => {
-    locale = button.dataset.language;
-    localStorage.setItem("resumeAnalyzerLanguage", locale);
-    applyLocale();
-    updateFileList();
-    if (!lastPayload) {
-      renderEmpty(t("addResumeFirst"));
-    } else {
-      renderResults(lastPayload);
-    }
-  });
+languageToggle.addEventListener("click", () => {
+  locale = locale === "en" ? "pt" : "en";
+  localStorage.setItem("resumeAnalyzerLanguage", locale);
+  applyLocale();
+  updateFileList();
+  if (!lastPayload) {
+    renderEmpty(t("addResumeFirst"));
+  } else {
+    renderResults(lastPayload);
+  }
 });
 
 form.addEventListener("submit", async (event) => {
@@ -411,6 +415,8 @@ form.addEventListener("submit", async (event) => {
   data.append("request_id", id);
   data.append("user_id", form.elements.userId.value.trim() || "recrutador-demo");
   data.append("language", locale);
+  data.append("llm_provider", form.elements.llmProvider.value || "local");
+  data.append("retrieval_mode", form.elements.retrievalMode.value || "hybrid");
   const query = form.elements.query.value.trim();
   if (query) {
     data.append("query", query);

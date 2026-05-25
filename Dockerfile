@@ -32,9 +32,28 @@ RUN pip install --no-cache-dir --upgrade pip
 
 COPY --chown=user pyproject.toml ./
 COPY --chown=user README.md ./
+
+RUN pip install --no-cache-dir --user \
+    "fastapi>=0.115.0,<1.0.0" \
+    "uvicorn[standard]>=0.30.0,<1.0.0" \
+    "python-multipart>=0.0.9,<1.0.0" \
+    "pydantic>=2.7.0,<3.0.0" \
+    "pydantic-settings>=2.3.0,<3.0.0" \
+    "pymupdf>=1.24.5,<2.0.0" \
+    "pytesseract>=0.3.13,<1.0.0" \
+    "motor>=3.5.1,<4.0.0" \
+    "prometheus-fastapi-instrumentator>=7.0.0,<8.0.0" \
+    "numpy==1.26.4" \
+    "pillow>=10.4.0,<11.0.0" \
+    "llama-cpp-python>=0.2.85,<0.3.0" \
+    "spacy>=3.7.0,<4.0.0"
+
+RUN python -m spacy download pt_core_news_sm && \
+    python -m spacy download en_core_web_sm
+
 COPY --chown=user app ./app
 
-RUN pip install --no-cache-dir --user .
+RUN pip install --no-cache-dir --user --no-deps .
 
 RUN find /home/user/app -type d -name __pycache__ -prune -exec rm -rf {} + && \
     python - <<'PY'

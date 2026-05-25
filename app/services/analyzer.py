@@ -12,6 +12,7 @@ from app.repositories.audit_logs import AuditLogRepository
 from app.schemas import AnalyzeResponse, RankingResult, SummaryResult
 from app.services.document_service import DocumentService
 from app.services.ranking_service import RankingService
+from app.services.resume_parser_service import ResumeParserService
 from app.services.summarization_service import SummarizationService
 
 logger = logging.getLogger(__name__)
@@ -23,12 +24,14 @@ class ResumeAnalyzerService:
         document_service: DocumentService,
         summarization_service: SummarizationService,
         ranking_service: RankingService,
+        resume_parser: ResumeParserService,
         audit_logs: AuditLogRepository,
         settings: Settings,
     ):
         self.document_service = document_service
         self.summarization_service = summarization_service
         self.ranking_service = ranking_service
+        self.resume_parser = resume_parser
         self.audit_logs = audit_logs
         self.settings = settings
         self.chunker = TextChunker(settings.chunk_size, settings.chunk_overlap)
@@ -39,10 +42,14 @@ class ResumeAnalyzerService:
         files: list[UploadFile],
         query: str | None,
         language: str,
+        llm_provider: str,
+        retrieval_mode: str,
         request_id: str,
         user_id: str,
     ) -> AnalyzeResponse:
         validate_uploads(files, self.settings)
+        if retrieval_mode not in {"bm25", "embedding", "hybrid"}:
+            retrieval_mode = "hybrid"
         started_at = time.perf_counter()
         status = "success"
         response_payload: dict[str, Any] = {}
@@ -52,13 +59,29 @@ class ResumeAnalyzerService:
             self._log_stage("documents_extracted", stage_started, request_id)
 
             stage_started = time.perf_counter()
+            profiles = await asyncio.gather(
+                *(
+                    self.resume_parser.parse(document.extracted_text, llm_provider)
+                    for document in documents
+                )
+            )
+            for document, profile in zip(documents, profiles, strict=False):
+                document.structured_profile = profile
+                raw_chunks = self.chunker.split(document.candidate, document.extracted_text)
+                structured_chunks = self._structured_chunks(document, len(raw_chunks))
+                document.chunks = raw_chunks + structured_chunks
+            self._log_stage("documents_structured_and_chunked", stage_started, request_id)
+
+            stage_started = time.perf_counter()
             summaries = await asyncio.gather(
-                *(self.summarization_service.summarize(document) for document in documents)
+                *(
+                    self.summarization_service.summarize(document, language)
+                    for document in documents
+                )
             )
             for document, summary in zip(documents, summaries, strict=False):
                 document.summary = summary
-                document.chunks = self.chunker.split(document.candidate, document.extracted_text)
-            self._log_stage("documents_chunked_and_summarized", stage_started, request_id)
+            self._log_stage("documents_summarized", stage_started, request_id)
 
             if not query:
                 results = [
@@ -68,7 +91,7 @@ class ResumeAnalyzerService:
                 response = AnalyzeResponse(request_id=request_id, results=results)
             else:
                 stage_started = time.perf_counter()
-                evidence = await self.ranking_service.rank(query, documents)
+                evidence = await self.ranking_service.rank(query, documents, retrieval_mode)
                 self._log_stage("in_memory_ranking_completed", stage_started, request_id)
 
                 stage_started = time.perf_counter()
@@ -76,6 +99,7 @@ class ResumeAnalyzerService:
                 synthesized = await self.summarization_service.synthesize_ranked_results(
                     query=query,
                     language=language,
+                    llm_provider=llm_provider,
                     evidence=evidence,
                     documents_by_candidate=documents_by_candidate,
                     max_new_tokens=self._synthesis_max_tokens(),
@@ -116,7 +140,10 @@ class ResumeAnalyzerService:
                     status=status,
                     costs={
                         "model": "Qwen2.5-0.5B-Instruct-GGUF",
-                        "ranking": "in_memory_bm25",
+                        "llm_provider": llm_provider,
+                        "retrieval_mode": retrieval_mode,
+                        "ranking": f"in_memory_{retrieval_mode}",
+                        "parsing": "section_splitter_spacy_json_in_memory",
                         "ocr": "tesseract",
                     },
                 )
@@ -149,4 +176,19 @@ class ResumeAnalyzerService:
         configured = (
             self.settings.summarization_max_new_tokens + self.settings.justification_max_new_tokens
         )
-        return min(160, configured)
+        return min(100, max(80, configured))
+
+    def _structured_chunks(self, document, start_index: int) -> list:
+        if document.structured_profile is None:
+            return []
+        chunks = []
+        for offset, view in enumerate(
+            self.resume_parser.semantic_views(document.candidate, document.structured_profile)
+        ):
+            view_chunks = self.chunker.split(document.candidate, view)
+            for chunk_index, chunk in enumerate(view_chunks):
+                chunk.chunk_id = (
+                    f"{document.candidate}-structured-{start_index + offset}-{chunk_index}"
+                )
+            chunks.extend(view_chunks)
+        return chunks

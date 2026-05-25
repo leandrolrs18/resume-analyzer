@@ -122,11 +122,24 @@ class ResumeChunk(BaseModel):
     text: str
 
 
+class ResumeStructuredProfile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = None
+    education: list[str] = Field(default_factory=list)
+    experience: list[str] = Field(default_factory=list)
+    skills: list[str] = Field(default_factory=list)
+    certifications: list[str] = Field(default_factory=list)
+    projects: list[str] = Field(default_factory=list)
+    languages: list[str] = Field(default_factory=list)
+
+
 class ResumeDocument(BaseModel):
     candidate: str
     source_filename: str
     extracted_text: str
     summary: str | None = None
+    structured_profile: ResumeStructuredProfile | None = None
     chunks: list[ResumeChunk] = Field(default_factory=list)
 
 
