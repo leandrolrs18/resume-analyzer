@@ -72,18 +72,17 @@ class ResumeAnalyzerService:
                 document.chunks = raw_chunks + structured_chunks
             self._log_stage("documents_structured_and_chunked", stage_started, request_id)
 
-            stage_started = time.perf_counter()
-            summaries = await asyncio.gather(
-                *(
-                    self.summarization_service.summarize(document, language)
-                    for document in documents
-                )
-            )
-            for document, summary in zip(documents, summaries, strict=False):
-                document.summary = summary
-            self._log_stage("documents_summarized", stage_started, request_id)
-
             if not query:
+                stage_started = time.perf_counter()
+                summaries = await asyncio.gather(
+                    *(
+                        self.summarization_service.summarize(document, language, llm_provider)
+                        for document in documents
+                    )
+                )
+                for document, summary in zip(documents, summaries, strict=False):
+                    document.summary = summary
+                self._log_stage("documents_summarized", stage_started, request_id)
                 results = [
                     SummaryResult(candidate=document.candidate, summary=document.summary or "")
                     for document in documents
@@ -114,9 +113,7 @@ class ResumeAnalyzerService:
                             rank=rank,
                             candidate=item.candidate,
                             score=round(item.score, 4),
-                            summary=synthesized_item.get(
-                                "summary", documents_by_candidate[item.candidate].summary or ""
-                            ),
+                            summary=synthesized_item.get("summary", ""),
                             justification=synthesized_item.get("justification", ""),
                             citations=item.citations,
                         )

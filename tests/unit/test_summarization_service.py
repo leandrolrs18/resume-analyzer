@@ -4,6 +4,19 @@ from app.schemas import Citation, RankingEvidence, ResumeDocument, ResumeStructu
 from app.services.summarization_service import SummarizationService
 
 
+class EchoLlm:
+    async def generate(self, prompt: str, max_new_tokens: int) -> str:
+        del prompt, max_new_tokens
+        return (
+            "FÁBIO VICENTE DE SENA\n"
+            "Desenvolvedor Front-end | React.js • TypeScript • Node.js • Firebase\n"
+            "Teodoro Sampaio – SP • (18) 98157-9318 • fabiosena1436@gmail.com\n"
+            "LinkedIn: linkedin/fabio-vicente-de-sena • GitHub: Github.com/fabiosena1436\n"
+            "Portfólio: Portifoliofabiosena.com.br\n"
+            "RESUMO PROFISSIONAL."
+        )
+
+
 @pytest.mark.asyncio
 async def test_summary_is_short_portuguese_paragraph() -> None:
     service = SummarizationService(llm_service=None, max_new_tokens=120)
@@ -24,6 +37,34 @@ async def test_summary_is_short_portuguese_paragraph() -> None:
     assert "\n" not in summary
     assert "formação" in summary
     assert "Python" in summary
+
+
+@pytest.mark.asyncio
+async def test_summary_rejects_copied_resume_header() -> None:
+    service = SummarizationService(llm_service=EchoLlm(), max_new_tokens=120)
+    document = ResumeDocument(
+        candidate="Fábio Vicente De Sena",
+        source_filename="fabio.pdf",
+        extracted_text=(
+            "FÁBIO VICENTE DE SENA\n"
+            "Desenvolvedor Front-end | React.js • TypeScript • Node.js • Firebase\n"
+            "Teodoro Sampaio – SP • (18) 98157-9318 • fabiosena1436@gmail.com\n"
+            "LinkedIn: linkedin/fabio-vicente-de-sena • GitHub: Github.com/fabiosena1436\n"
+            "Portfólio: Portifoliofabiosena.com.br\n"
+            "RESUMO PROFISSIONAL\n"
+            "Atua no desenvolvimento de interfaces web com React e TypeScript."
+        ),
+        structured_profile=ResumeStructuredProfile(
+            experience=["Desenvolvedor Front-end"],
+            skills=["React.js", "TypeScript", "Node.js", "Firebase"],
+        ),
+    )
+
+    summary = await service.summarize(document, language="pt")
+
+    assert "fabiosena1436@gmail.com" not in summary
+    assert "GitHub" not in summary
+    assert "competências" in summary
 
 
 @pytest.mark.asyncio

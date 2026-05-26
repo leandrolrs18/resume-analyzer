@@ -37,12 +37,9 @@ def create_app() -> FastAPI:
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
     @app.get("/", include_in_schema=False)
-    async def index() -> FileResponse:
-        return FileResponse(static_dir / "index.html")
-
     @app.get("/en", include_in_schema=False)
     @app.get("/en/", include_in_schema=False)
-    async def index_en() -> FileResponse:
+    async def index() -> FileResponse:
         return FileResponse(static_dir / "index.html")
 
     app.include_router(router)

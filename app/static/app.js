@@ -323,6 +323,9 @@ function renderResults(payload) {
             .join("")
         : "";
       const citationBlock = citations ? `<p class="meta-title">${t("citations")}</p>${citations}` : "";
+      const summaryBlock = payload.query
+        ? ""
+        : `<p class="meta-title">${t("summary")}</p><div class="summary">${escapeHtml(item.summary || t("noSummary"))}</div>`;
 
       return `
         <article class="result-card">
@@ -330,8 +333,7 @@ function renderResults(payload) {
             <h3>${item.rank ? `${item.rank}. ` : ""}${escapeHtml(item.candidate || "Candidato")}</h3>
             ${score}
           </div>
-          <p class="meta-title">${t("summary")}</p>
-          <div class="summary">${escapeHtml(item.summary || t("noSummary"))}</div>
+          ${summaryBlock}
           ${justification}
           ${citationBlock}
         </article>

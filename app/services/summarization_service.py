@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import Any
 
 from app.schemas import RankingEvidence, ResumeDocument
@@ -14,8 +15,27 @@ class SummarizationService:
         self.groq_service = groq_service
         self.max_new_tokens = max_new_tokens
 
-    async def summarize(self, document: ResumeDocument, language: str = "pt") -> str:
-        return self._fallback_summary(document, language, [])
+    async def summarize(
+        self,
+        document: ResumeDocument,
+        language: str = "pt",
+        llm_provider: str = "local",
+    ) -> str:
+        fallback = self._fallback_summary(document, language, [])
+        summary = fallback
+        llm = self._llm(llm_provider)
+        if llm:
+            try:
+                prompt = self._summary_prompt(document, language)
+                generated = (await llm.generate(prompt, max(self.max_new_tokens, 220))).strip()
+                generated = self._six_line_summary(generated)
+                if self._valid_summary(generated) and not self._looks_like_copied_resume(
+                    generated, document
+                ):
+                    summary = generated
+            except Exception:
+                logger.exception("llm_summary_failed")
+        return summary
 
     async def synthesize_ranked_results(
         self,
@@ -61,6 +81,26 @@ class SummarizationService:
         if provider == "groq" and self.groq_service:
             return self.groq_service
         return self.llm_service
+
+    @staticmethod
+    def _summary_prompt(document: ResumeDocument, language: str) -> str:
+        lang = "inglês" if language == "en" else "português do Brasil"
+        profile = (
+            document.structured_profile.model_dump()
+            if document.structured_profile is not None
+            else {}
+        )
+        evidence = document.extracted_text[:3000]
+        return (
+            f"Responda em {lang}. Use somente os dados do currículo abaixo, sem inventar. "
+            "Retorne exatamente 6 linhas. Cada linha deve ser uma frase curta, com no máximo "
+            "22 palavras. Cubra formação, experiência, competências, projetos ou atividades "
+            "relevantes e senioridade aparente. Evite repetir ideias. Não use markdown, "
+            "numeração, bullets, rótulos, dados de contato ou cabeçalho copiado do currículo.\n\n"
+            f"Candidato: {document.candidate}\n"
+            f"Perfil estruturado: {profile}\n\n"
+            f"Trecho do currículo:\n{evidence}"
+        )
 
     @staticmethod
     def _prompt(query: str, language: str, evidence: list[RankingEvidence]) -> str:
@@ -170,3 +210,49 @@ class SummarizationService:
     @staticmethod
     def _valid_summary(value: str) -> bool:
         return len(value) >= 120 and sum(value.count(char) for char in ".!?") >= 2
+
+    @classmethod
+    def _looks_like_copied_resume(cls, value: str, document: ResumeDocument) -> bool:
+        normalized_value = cls._normalize_for_comparison(value)
+        if any(marker in normalized_value for marker in ("@", "linkedin", "github", "portfolio")):
+            return True
+
+        copied_lines = 0
+        resume_lines = [
+            cls._normalize_for_comparison(line)
+            for line in document.extracted_text.splitlines()
+            if len(cls._normalize_for_comparison(line)) >= 18
+        ]
+        for generated_line in value.splitlines():
+            normalized_line = cls._normalize_for_comparison(generated_line)
+            if len(normalized_line) < 18:
+                continue
+            if any(
+                normalized_line == resume_line
+                or normalized_line in resume_line
+                or resume_line in normalized_line
+                for resume_line in resume_lines[:40]
+            ):
+                copied_lines += 1
+            if copied_lines >= 2:
+                return True
+        return False
+
+    @staticmethod
+    def _normalize_for_comparison(value: str) -> str:
+        return " ".join(value.casefold().split())
+
+    @staticmethod
+    def _six_line_summary(value: str) -> str:
+        lines = [
+            re.sub(r"^\s*(?:[-*•]|\d+[.)])\s*", "", line).strip()
+            for line in value.splitlines()
+            if line.strip()
+        ]
+        if len(lines) == 1:
+            lines = [
+                sentence.strip()
+                for sentence in re.split(r"(?<=[.!?])\s+", lines[0])
+                if sentence.strip()
+            ]
+        return "\n".join(lines[:6])

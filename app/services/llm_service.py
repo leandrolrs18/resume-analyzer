@@ -27,6 +27,7 @@ class LlmService:
             )
 
         self._model = None
+        self._generation_lock = asyncio.Lock()
 
     def _load_model(self) -> Any:
         """
@@ -93,7 +94,9 @@ class LlmService:
         o loop de eventos assíncronos do FastAPI.
         """
         try:
-            return await asyncio.to_thread(self._generate_sync, prompt, max_new_tokens)
+            self._load_model()
+            async with self._generation_lock:
+                return await asyncio.to_thread(self._generate_sync, prompt, max_new_tokens)
         except Exception:
             LLM_FAILURES_TOTAL.inc()
             logger.exception("llm_generation_failed")

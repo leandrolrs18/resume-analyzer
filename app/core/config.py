@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     mongo_uri: str = Field(default="mongodb://mongodb:27017")
     mongo_db: str = Field(default="resume-analyzer")
     hf_model: str = Field(default="google/flan-t5-small")
-    use_local_llm: bool = Field(default=False)
+    use_local_llm: bool = Field(default=True)
     groq_api_key: str = Field(default="")
     groq_model: str = Field(default="llama-3.3-70b-versatile")
     log_level: str = Field(default="INFO")
