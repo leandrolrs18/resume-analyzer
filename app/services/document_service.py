@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import logging
 from pathlib import Path
 
@@ -20,20 +21,58 @@ class DocumentService:
     def __init__(self, ocr_service: OcrService, settings: Settings):
         self.ocr_service = ocr_service
         self.settings = settings
+        self._extraction_cache: dict[str, ResumeDocument] = {}
 
     async def extract_documents(self, files: list[UploadFile]) -> list[ResumeDocument]:
-        return await asyncio.gather(*(self._extract_single(upload) for upload in files))
+        uploads = []
+        for upload in files:
+            content = await upload.read()
+            filename = upload.filename or "unknown"
+            self._validate_size(content, filename)
+            uploads.append((upload, content, self._cache_key(filename, content)))
+
+        active_keys = {cache_key for _, _, cache_key in uploads}
+        self._prune_cache(active_keys)
+
+        return await asyncio.gather(
+            *(
+                self._extract_cached(upload, content, cache_key)
+                for upload, content, cache_key in uploads
+            )
+        )
 
     async def _extract_single(self, upload: UploadFile) -> ResumeDocument:
         content = await upload.read()
-        if len(content) > self.settings.max_upload_size_bytes:
-            raise ApplicationError(
-                "Uploaded file exceeds maximum allowed size",
-                status_code=413,
-                details={"filename": upload.filename},
-            )
-        candidate = self._candidate_name(upload.filename or "unknown")
-        if (upload.filename or "").lower().endswith(".pdf"):
+        filename = upload.filename or "unknown"
+        self._validate_size(content, filename)
+        return await self._extract_from_content(
+            filename,
+            content,
+            self._cache_key(filename, content),
+        )
+
+    async def _extract_cached(
+        self,
+        upload: UploadFile,
+        content: bytes,
+        cache_key: str,
+    ) -> ResumeDocument:
+        if cache_key in self._extraction_cache:
+            return self._extraction_cache[cache_key].model_copy(deep=True)
+
+        filename = upload.filename or "unknown"
+        document = await self._extract_from_content(filename, content, cache_key)
+        self._extraction_cache[cache_key] = document.model_copy(deep=True)
+        return document.model_copy(deep=True)
+
+    async def _extract_from_content(
+        self,
+        filename: str,
+        content: bytes,
+        cache_key: str,
+    ) -> ResumeDocument:
+        candidate = self._candidate_name(filename)
+        if filename.lower().endswith(".pdf"):
             extracted_text = await self._extract_pdf(content)
         else:
             extracted_text = await self.ocr_service.extract_from_image_bytes(content)
@@ -41,12 +80,13 @@ class DocumentService:
             raise ApplicationError(
                 "No text could be extracted from file",
                 status_code=422,
-                details={"filename": upload.filename},
+                details={"filename": filename},
             )
         return ResumeDocument(
             candidate=candidate,
-            source_filename=upload.filename or candidate,
+            source_filename=filename,
             extracted_text=extracted_text.strip(),
+            cache_key=cache_key,
         )
 
     async def _extract_pdf(self, content: bytes) -> str:
@@ -129,3 +169,21 @@ class DocumentService:
     def _candidate_name(filename: str) -> str:
         stem = Path(filename).stem.replace("_", " ").replace("-", " ").strip()
         return stem.title() if stem else "Unknown Candidate"
+
+    def _validate_size(self, content: bytes, filename: str) -> None:
+        if len(content) > self.settings.max_upload_size_bytes:
+            raise ApplicationError(
+                "Uploaded file exceeds maximum allowed size",
+                status_code=413,
+                details={"filename": filename},
+            )
+
+    def _prune_cache(self, active_keys: set[str]) -> None:
+        removed = [key for key in self._extraction_cache if key not in active_keys]
+        for key in removed:
+            del self._extraction_cache[key]
+
+    @staticmethod
+    def _cache_key(filename: str, content: bytes) -> str:
+        digest = hashlib.sha256(content).hexdigest()
+        return f"{filename}:{digest}"

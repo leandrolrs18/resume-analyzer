@@ -16,11 +16,9 @@
       <form id="analyze-form" class="controls">
         <label class="field">
           <span data-i18n="ragModel">Modelo RAG</span>
-          <select name="retrievalMode">
-            <option value="hybrid" data-i18n="retrievalHybrid">Híbrido: BM25 + embeddings</option>
-            <option value="embedding" data-i18n="retrievalEmbedding">Embeddings em memória</option>
-            <option value="bm25" data-i18n="retrievalBm25">BM25 em memória</option>
-          </select>
+          <div class="mode-display" data-i18n="retrievalHybrid">
+            Híbrido: BM25 + embeddings + reranking
+          </div>
         </label>
 
         <label class="field">
@@ -28,6 +26,7 @@
           <select name="llmProvider">
             <option value="local">Qwen2.5 local via Hugging Face</option>
             <option value="groq">Groq Llama 3.3 70B</option>
+            <option value="xai">Grok xAI</option>
           </select>
         </label>
 
@@ -63,8 +62,8 @@
         <h3 data-i18n="requestMode">Modo da requisição</h3>
         <p>
           <span data-i18n="requestModeCopy">
-            Os arquivos e a pergunta são enviados juntos no POST e processados sem salvar
-            currículos, arquivos ou vetores.
+            Os arquivos e a pergunta são enviados juntos no POST e ficam apenas no cache em
+            memória do servidor.
           </span>
         </p>
       </section>

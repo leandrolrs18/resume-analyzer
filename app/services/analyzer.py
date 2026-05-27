@@ -35,6 +35,7 @@ class ResumeAnalyzerService:
         self.audit_logs = audit_logs
         self.settings = settings
         self.chunker = TextChunker(settings.chunk_size, settings.chunk_overlap)
+        self._document_cache: dict[str, Any] = {}
 
     async def analyze(
         self,
@@ -43,45 +44,28 @@ class ResumeAnalyzerService:
         query: str | None,
         language: str,
         llm_provider: str,
-        retrieval_mode: str,
         request_id: str,
         user_id: str,
     ) -> AnalyzeResponse:
         validate_uploads(files, self.settings)
-        if retrieval_mode not in {"bm25", "embedding", "hybrid"}:
-            retrieval_mode = "hybrid"
         started_at = time.perf_counter()
         status = "success"
         response_payload: dict[str, Any] = {}
         try:
             stage_started = time.perf_counter()
             documents = await self.document_service.extract_documents(files)
+            self._prune_document_cache(
+                {document.cache_key for document in documents if document.cache_key}
+            )
             self._log_stage("documents_extracted", stage_started, request_id)
 
             stage_started = time.perf_counter()
-            profiles = await asyncio.gather(
-                *(
-                    self.resume_parser.parse(document.extracted_text, llm_provider)
-                    for document in documents
-                )
-            )
-            for document, profile in zip(documents, profiles, strict=False):
-                document.structured_profile = profile
-                raw_chunks = self.chunker.split(document.candidate, document.extracted_text)
-                structured_chunks = self._structured_chunks(document, len(raw_chunks))
-                document.chunks = raw_chunks + structured_chunks
+            documents = await self._prepare_documents(documents, llm_provider, request_id)
             self._log_stage("documents_structured_and_chunked", stage_started, request_id)
 
             if not query:
                 stage_started = time.perf_counter()
-                summaries = await asyncio.gather(
-                    *(
-                        self.summarization_service.summarize(document, language, llm_provider)
-                        for document in documents
-                    )
-                )
-                for document, summary in zip(documents, summaries, strict=False):
-                    document.summary = summary
+                await self._summarize_documents(documents, language, llm_provider)
                 self._log_stage("documents_summarized", stage_started, request_id)
                 results = [
                     SummaryResult(candidate=document.candidate, summary=document.summary or "")
@@ -90,7 +74,7 @@ class ResumeAnalyzerService:
                 response = AnalyzeResponse(request_id=request_id, results=results)
             else:
                 stage_started = time.perf_counter()
-                evidence = await self.ranking_service.rank(query, documents, retrieval_mode)
+                evidence = await self.ranking_service.rank(query, documents)
                 self._log_stage("in_memory_ranking_completed", stage_started, request_id)
 
                 stage_started = time.perf_counter()
@@ -138,8 +122,8 @@ class ResumeAnalyzerService:
                     costs={
                         "model": "Qwen2.5-0.5B-Instruct-GGUF",
                         "llm_provider": llm_provider,
-                        "retrieval_mode": retrieval_mode,
-                        "ranking": f"in_memory_{retrieval_mode}",
+                        "retrieval_strategy": "hybrid",
+                        "ranking": "in_memory_hybrid_bm25_embeddings_rerank",
                         "parsing": "section_splitter_spacy_json_in_memory",
                         "ocr": "tesseract",
                     },
@@ -179,9 +163,10 @@ class ResumeAnalyzerService:
         if document.structured_profile is None:
             return []
         chunks = []
-        for offset, view in enumerate(
-            self.resume_parser.semantic_views(document.candidate, document.structured_profile)
-        ):
+        semantic_views = self.resume_parser.semantic_views(
+            document.candidate, document.structured_profile
+        )
+        for offset, view in enumerate(semantic_views):
             view_chunks = self.chunker.split(document.candidate, view)
             for chunk_index, chunk in enumerate(view_chunks):
                 chunk.chunk_id = (
@@ -189,3 +174,72 @@ class ResumeAnalyzerService:
                 )
             chunks.extend(view_chunks)
         return chunks
+
+    async def _prepare_documents(
+        self,
+        documents: list,
+        llm_provider: str,
+        request_id: str,
+    ) -> list:
+        prepared = []
+        to_process = []
+        for index, document in enumerate(documents):
+            cache_key = document.cache_key
+            if cache_key and cache_key in self._document_cache:
+                cached = self._document_cache[cache_key].model_copy(deep=True)
+                prepared.append((index, cached))
+            else:
+                to_process.append((index, document))
+
+        profiles = await asyncio.gather(
+            *(
+                self.resume_parser.parse(document.extracted_text, llm_provider)
+                for _, document in to_process
+            )
+        )
+        for (index, document), profile in zip(to_process, profiles, strict=False):
+            document.structured_profile = profile
+            raw_chunks = self.chunker.split(document.candidate, document.extracted_text)
+            structured_chunks = self._structured_chunks(document, len(raw_chunks))
+            document.chunks = raw_chunks + structured_chunks
+            if document.cache_key:
+                self._document_cache[document.cache_key] = document.model_copy(deep=True)
+            prepared.append((index, document))
+
+        return [document for _, document in sorted(prepared, key=lambda item: item[0])]
+
+    async def _summarize_documents(
+        self,
+        documents: list,
+        language: str,
+        llm_provider: str,
+    ) -> None:
+        missing = [
+            document
+            for document in documents
+            if not document.summary or document.summary_language != language
+        ]
+        summaries = await asyncio.gather(
+            *(
+                self.summarization_service.summarize(document, language, llm_provider)
+                for document in missing
+            )
+        )
+        for document, summary in zip(missing, summaries, strict=False):
+            document.summary = summary
+            document.summary_language = language
+            if document.cache_key:
+                self._document_cache[document.cache_key] = document.model_copy(deep=True)
+
+        for document in documents:
+            if document.summary and document.summary_language == language:
+                continue
+            cached = self._document_cache.get(document.cache_key or "")
+            if cached and cached.summary and cached.summary_language == language:
+                document.summary = cached.summary
+                document.summary_language = cached.summary_language
+
+    def _prune_document_cache(self, active_keys: set[str]) -> None:
+        removed = [key for key in self._document_cache if key not in active_keys]
+        for key in removed:
+            del self._document_cache[key]

@@ -11,14 +11,13 @@ pinned: false
 
 ## Introdução
 
-Este projeto é uma API stateless para triagem de currículos. A aplicação recebe múltiplos
-currículos em PDF, PNG, JPG ou JPEG, extrai texto com leitura nativa de PDF e OCR, gera sumários
-curtos e responde perguntas de recrutamento com ranking, score, justificativas e citações.
+Este projeto é uma API para triagem de currículos. A aplicação recebe múltiplos currículos em PDF,
+PNG, JPG ou JPEG, extrai texto com leitura nativa de PDF e OCR, gera sumários curtos e responde
+perguntas de recrutamento com ranking, score, justificativas e citações.
 
 O desenho central combina recuperação em memória com um LLM local. Em vez de salvar documentos,
-currículos ou vetores, cada requisição envia os arquivos e a pergunta ao mesmo tempo. A API
-processa tudo em tempo real, encontra as evidências mais relevantes, aciona o LLM para sintetizar
-a resposta e registra apenas logs de auditoria com metadados e resultado.
+currículos ou vetores em banco, a API mantém apenas um cache em memória do processo para reaproveitar
+currículos repetidos até o servidor cair ou até uma nova requisição deixar de enviar aquele arquivo.
 
 ## Por que triagem de currículos?
 
@@ -43,12 +42,12 @@ um contexto recuperado. Neste projeto, a recuperação acontece somente dentro d
   canônico temporário.
 - **Views semânticas:** o JSON estruturado gera representações textuais específicas para busca.
 - **Chunking em memória:** o texto bruto e as views estruturadas são divididos em trechos menores.
-- **Recuperação em memória:** os trechos podem ser ranqueados por BM25, embeddings em memória
-  ou modo híbrido.
+- **Recuperação híbrida em memória:** cada trecho recebe score BM25, score de embedding em
+  memória, combinação ponderada 70/30 e reranking antes do LLM.
 - **Geração baseada em evidências:** o LLM local recebe apenas as principais evidências.
 - **Citações:** cada candidato ranqueado retorna os trechos usados como base.
 
-Não há banco vetorial e os arquivos enviados não são persistidos.
+Não há banco vetorial e os arquivos enviados não são persistidos fora da memória do servidor.
 
 ## Demonstração
 
@@ -76,8 +75,8 @@ Painel de logs e métricas:
 
 ### 1. Fluxo da requisição
 
-A API é stateless. O usuário envia currículos, `request_id`, `user_id` e uma `query` opcional na
-mesma chamada `POST /analyze`.
+O usuário envia currículos, `request_id`, `user_id` e uma `query` opcional na mesma chamada
+`POST /analyze`. Currículos repetidos podem ser reaproveitados do cache em memória do processo.
 
 Quando a query não é enviada, a API retorna um sumário curto por currículo. Quando a query é
 enviada, a API retorna candidatos ranqueados com score normalizado, sumário, justificativa e
@@ -92,7 +91,7 @@ flowchart LR
     E --> F["Chunking em memória<br/>texto bruto + views"]
     F --> G["Ranking BM25 / embeddings<br/>em memória"]
     G --> H["Principais evidências"]
-    H --> I["LLM final<br/>Qwen local ou Groq"]
+    H --> I["LLM final<br/>Qwen local, Groq ou Grok xAI"]
     I --> J["Resposta<br/>ranking, score, sumário, justificativa e citações"]
     J --> K["audit_logs<br/>metadados e resultado"]
 ```
@@ -105,12 +104,12 @@ português e inglês, e spaCy NER apenas para apoiar a identificação de nome q
 instalado. Esse JSON não é persistido; ele serve para gerar views semânticas, por exemplo
 "formação", "competências" e "experiência".
 
-O ranqueador pode operar em três modos: `bm25`, `embedding` ou `hybrid`. O modo híbrido combina
-BM25, que preserva termos literais como tecnologias, instituições e certificações, com embeddings
-em memória, que melhoram perguntas abertas e semânticas. Os vetores são criados somente durante a
-requisição e não são persistidos. O LLM entra depois da recuperação, recebendo um prompt curto com
-as principais evidências. Caso o LLM falhe ou devolva JSON inválido, o sistema usa fallback baseado
-no texto recuperado.
+O ranqueador opera somente em modo híbrido. Ele calcula BM25 para preservar termos literais como
+tecnologias, instituições e certificações, calcula similaridade por embeddings em memória para
+capturar proximidade semântica, combina os scores com `0.7 * embedding_score + 0.3 * bm25_score`,
+seleciona um top-k inicial e aplica reranking antes de enviar as principais evidências ao LLM. Os
+vetores são criados somente durante a requisição e não são persistidos. Caso o LLM falhe ou devolva
+JSON inválido, o sistema usa fallback baseado no texto recuperado.
 
 ### 3. Estratégia anti-alucinação
 
@@ -128,7 +127,8 @@ texto extraído.
 
 - Arquivos de currículo não são salvos.
 - Vetores não são salvos.
-- Os uploads são processados em memória.
+- Os uploads são processados e cacheados apenas em memória, até o servidor cair ou uma nova
+  requisição remover currículos que não foram reenviados.
 - Os formatos aceitos são PDF, PNG, JPG e JPEG.
 - Há limites de tamanho, quantidade de arquivos e páginas por documento.
 - PDFs criptografados, protegidos por senha ou com arquivos embutidos são rejeitados.
@@ -140,8 +140,8 @@ texto extraído.
 - **API:** FastAPI
 - **OCR:** Tesseract OCR com pacotes de português e inglês
 - **PDF:** PyMuPDF
-- **Recuperação:** BM25, embeddings em memória ou modo híbrido
-- **LLM:** Qwen2.5 GGUF local via llama.cpp
+- **Recuperação:** busca híbrida única com BM25, embeddings em memória e reranking
+- **LLM:** Qwen2.5 GGUF local via llama.cpp, Groq ou Grok xAI
 - **Banco:** MongoDB para auditoria
 - **Métricas:** formato Prometheus
 - **Infra:** Docker e Docker Compose
@@ -233,14 +233,16 @@ USE_LOCAL_LLM=true
 LOG_LEVEL=INFO
 GROQ_API_KEY=
 GROQ_MODEL=llama-3.3-70b-versatile
+XAI_API_KEY=
+XAI_MODEL=grok-4.20-reasoning
 ```
 
-`GROQ_API_KEY` é opcional. Quando configurada, o front permite usar a opção
-`Groq Llama 3.3 70B`; quando ausente, o sistema continua funcionando com o modelo local.
+`GROQ_API_KEY` e `XAI_API_KEY` são opcionais. Quando configuradas, o front permite usar
+Groq ou Grok xAI; quando ausentes, o sistema continua funcionando com o modelo local.
 Não coloque chaves reais no repositório.
 
-Ao selecionar Groq, somente as evidências ranqueadas e a pergunta são enviadas para a
-API externa de LLM. Para execução 100% privada dentro do container, use o modelo local.
+Ao selecionar Groq ou Grok xAI, somente as evidências ranqueadas e a pergunta são enviadas para a
+API externa de LLM escolhida. Para execução 100% privada dentro do container, use o modelo local.
 
 ### 3. Rodar com Docker Compose
 
@@ -317,7 +319,7 @@ Meta de latência:
 
 O desenho atual prioriza conformidade com o desafio e privacidade:
 
-- Processamento stateless
+- Cache em memória por requisição atual
 - Sem persistência de arquivos
 - Sem persistência de vetores
 - Recuperação em memória
@@ -334,5 +336,5 @@ Evoluções naturais para produção:
 
 ## Agradecimento
 
-Inspirado em pipelines RAG para triagem de currículos, adaptado para um desafio backend stateless
-em que arquivos, currículos e vetores não podem ser persistidos.
+Inspirado em pipelines RAG para triagem de currículos, adaptado para um desafio backend em que
+arquivos, currículos e vetores não podem ser persistidos fora da memória do servidor.

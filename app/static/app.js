@@ -48,7 +48,7 @@ const copy = {
     clear: "Limpar",
     requestMode: "Modo da requisição",
     requestModeCopy:
-      "Os arquivos e a pergunta são enviados juntos no POST e processados sem salvar currículos, arquivos ou vetores.",
+      "Os arquivos e a pergunta são enviados juntos no POST e ficam apenas no cache em memória do servidor.",
     heroEyebrow: "Triagem com IA local",
     heroTitle: "Encontre os currículos mais aderentes",
     heroCopy:
@@ -56,9 +56,7 @@ const copy = {
     results: "Resultados",
     showJson: "Ver JSON",
     ragModel: "Modelo RAG",
-    retrievalHybrid: "Híbrido: BM25 + embeddings",
-    retrievalEmbedding: "Embeddings em memória",
-    retrievalBm25: "BM25 em memória",
+    retrievalHybrid: "Híbrido: BM25 + embeddings + reranking",
     llmModel: "Modelo LLM",
     singleOption: "Apenas uma opção disponível",
     userId: "ID do usuário",
@@ -104,7 +102,7 @@ const copy = {
     clear: "Clear",
     requestMode: "Request mode",
     requestModeCopy:
-      "Files and the query are sent together in the POST request and processed without saving resumes, files or vectors.",
+      "Files and the query are sent together and stay only in the server's in-memory cache.",
     heroEyebrow: "Local AI screening",
     heroTitle: "Find the most relevant resumes",
     heroCopy:
@@ -112,9 +110,7 @@ const copy = {
     results: "Results",
     showJson: "View JSON",
     ragModel: "RAG model",
-    retrievalHybrid: "Hybrid: BM25 + embeddings",
-    retrievalEmbedding: "In-memory embeddings",
-    retrievalBm25: "In-memory BM25",
+    retrievalHybrid: "Hybrid: BM25 + embeddings + reranking",
     llmModel: "LLM model",
     singleOption: "Only one option available",
     userId: "User ID",
@@ -418,7 +414,6 @@ form.addEventListener("submit", async (event) => {
   data.append("user_id", form.elements.userId.value.trim() || "recrutador-demo");
   data.append("language", locale);
   data.append("llm_provider", form.elements.llmProvider.value || "local");
-  data.append("retrieval_mode", form.elements.retrievalMode.value || "hybrid");
   const query = form.elements.query.value.trim();
   if (query) {
     data.append("query", query);

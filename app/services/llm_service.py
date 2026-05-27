@@ -12,6 +12,7 @@ from app.observability.metrics import LLM_FAILURES_TOTAL
 logger = logging.getLogger(__name__)
 
 GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions"
+XAI_RESPONSES_URL = "https://api.x.ai/v1/responses"
 
 
 class LlmService:
@@ -171,3 +172,86 @@ class GroqLlmService:
             LLM_FAILURES_TOTAL.inc()
             logger.exception("groq_generation_failed")
             raise
+
+
+class XaiLlmService:
+    def __init__(self, api_key: str, model: str):
+        self.api_key = api_key
+        self.model = model
+
+    def _generate_sync(self, prompt: str, max_new_tokens: int) -> str:
+        if not self.api_key:
+            raise RuntimeError("XAI_API_KEY não configurada")
+
+        started_at = time.perf_counter()
+        payload = {
+            "model": self.model,
+            "input": (
+                "Você é um assistente de recrutamento técnico estrito e preciso.\n\n"
+                f"{prompt}"
+            ),
+            "temperature": 0.1,
+            "max_output_tokens": max_new_tokens,
+        }
+        request = urllib.request.Request(
+            XAI_RESPONSES_URL,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=45) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+            raise
+
+        generated_text = self._extract_text(data)
+        logger.info(
+            "xai_generation_completed",
+            extra={
+                "latency_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                "max_new_tokens": max_new_tokens,
+                "model": self.model,
+            },
+        )
+        print(
+            "[GROK][xai][success]",
+            {
+                "model": self.model,
+                "response_chars": len(generated_text),
+                "latency_ms": round((time.perf_counter() - started_at) * 1000, 2),
+            },
+        )
+        return generated_text
+
+    async def generate(self, prompt: str, max_new_tokens: int) -> str:
+        try:
+            return await asyncio.to_thread(self._generate_sync, prompt, max_new_tokens)
+        except Exception:
+            LLM_FAILURES_TOTAL.inc()
+            logger.exception("xai_generation_failed")
+            raise
+
+    @staticmethod
+    def _extract_text(data: dict[str, Any]) -> str:
+        if data.get("output_text"):
+            return str(data["output_text"]).strip()
+
+        texts = []
+        for item in data.get("output", []):
+            for content in item.get("content", []):
+                if isinstance(content, dict) and content.get("text"):
+                    texts.append(str(content["text"]))
+        if texts:
+            return "\n".join(texts).strip()
+
+        choices = data.get("choices", [])
+        if choices:
+            message = choices[0].get("message", {})
+            if message.get("content"):
+                return str(message["content"]).strip()
+
+        raise ValueError("xAI response did not include generated text")

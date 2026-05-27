@@ -96,6 +96,16 @@ textarea {
   outline: none;
 }
 
+.mode-display {
+  width: 100%;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: #17181d;
+  color: #ffffff;
+  padding: 11px 12px;
+  font-weight: 700;
+}
+
 .field textarea {
   resize: vertical;
   min-height: 120px;

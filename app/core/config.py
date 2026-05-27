@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     use_local_llm: bool = Field(default=True)
     groq_api_key: str = Field(default="")
     groq_model: str = Field(default="llama-3.3-70b-versatile")
+    xai_api_key: str = Field(default="")
+    xai_model: str = Field(default="grok-4.20-reasoning")
     log_level: str = Field(default="INFO")
     max_upload_size_bytes: int = Field(default=10 * 1024 * 1024)
     max_files: int = Field(default=10)

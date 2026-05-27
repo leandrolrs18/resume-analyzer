@@ -9,10 +9,15 @@ logger = logging.getLogger(__name__)
 
 class SummarizationService:
     def __init__(
-        self, llm_service: Any | None, max_new_tokens: int, groq_service: Any | None = None
+        self,
+        llm_service: Any | None,
+        max_new_tokens: int,
+        groq_service: Any | None = None,
+        xai_service: Any | None = None,
     ):
         self.llm_service = llm_service
         self.groq_service = groq_service
+        self.xai_service = xai_service
         self.max_new_tokens = max_new_tokens
 
     async def summarize(
@@ -21,6 +26,7 @@ class SummarizationService:
         language: str = "pt",
         llm_provider: str = "local",
     ) -> str:
+        language = self._normalize_language(language)
         fallback = self._fallback_summary(document, language, [])
         summary = fallback
         llm = self._llm(llm_provider)
@@ -28,8 +34,8 @@ class SummarizationService:
             try:
                 prompt = self._summary_prompt(document, language)
                 generated = (await llm.generate(prompt, max(self.max_new_tokens, 220))).strip()
-                generated = self._six_line_summary(generated)
-                if self._valid_summary(generated) and not self._looks_like_copied_resume(
+                generated = self._summary_lines(generated)
+                if self._valid_summary(generated, language) and not self._looks_like_copied_resume(
                     generated, document
                 ):
                     summary = generated
@@ -64,15 +70,25 @@ class SummarizationService:
             return fallback
 
         try:
-            parsed = self._blocks(
-                await llm.generate(self._prompt(query, language, grounded), max_new_tokens)
+            prompt = self._prompt(query, language, grounded)
+            print(
+                "[LLM][prompt_context]",
+                {
+                    "provider": llm_provider,
+                    "query": query,
+                    "prompt": prompt,
+                },
             )
+            parsed = self._blocks(await llm.generate(prompt, max_new_tokens))
             for candidate, item in parsed.items():
                 if candidate not in fallback:
                     continue
                 summary = item.get("summary", "").strip()
-                if self._valid_summary(summary):
+                if self._valid_summary(summary, language):
                     fallback[candidate]["summary"] = summary
+                justification = item.get("justification", "").strip()
+                if self._valid_justification(justification, candidate):
+                    fallback[candidate]["justification"] = justification
         except Exception:
             logger.exception("single_llm_synthesis_failed")
         return fallback
@@ -80,6 +96,8 @@ class SummarizationService:
     def _llm(self, provider: str):
         if provider == "groq" and self.groq_service:
             return self.groq_service
+        if provider == "xai" and self.xai_service:
+            return self.xai_service
         return self.llm_service
 
     @staticmethod
@@ -92,11 +110,15 @@ class SummarizationService:
         )
         evidence = document.extracted_text[:3000]
         return (
-            f"Responda em {lang}. Use somente os dados do currículo abaixo, sem inventar. "
-            "Retorne exatamente 6 linhas. Cada linha deve ser uma frase curta, com no máximo "
-            "22 palavras. Cubra formação, experiência, competências, projetos ou atividades "
-            "relevantes e senioridade aparente. Evite repetir ideias. Não use markdown, "
-            "numeração, bullets, rótulos, dados de contato ou cabeçalho copiado do currículo.\n\n"
+            f"Idioma obrigatório: {lang}. Use somente os dados do currículo abaixo, "
+            "sem inventar. "
+            "Retorne um único parágrafo natural com 5 a 8 frases curtas. Escreva em terceira "
+            "pessoa, como avaliador de recrutamento. Cubra perfil profissional, formação, "
+            "experiência, competências, projetos ou senioridade aparente. Não use inglês "
+            "quando o idioma obrigatório for português. Não use markdown, numeração, bullets, "
+            "rótulos, "
+            "dados de contato ou cabeçalho copiado do currículo. Não diga 'perfil baseado nos "
+            "dados extraídos'. Não repita a mesma tecnologia várias vezes.\n\n"
             f"Candidato: {document.candidate}\n"
             f"Perfil estruturado: {profile}\n\n"
             f"Trecho do currículo:\n{evidence}"
@@ -107,14 +129,23 @@ class SummarizationService:
         lang = "inglês" if language == "en" else "português do Brasil"
         blocks = []
         for item in evidence[:2]:
-            citations = "\n".join(f"- {citation.text[:220]}" for citation in item.citations[:2])
+            citations = "\n".join(
+                f"- {SummarizationService._truncate_words(citation.text, 220)}"
+                for citation in item.citations[:2]
+            )
             blocks.append(f"Candidato: {item.candidate}\nEvidências:\n{citations}")
         return (
             f"Responda em {lang}. Use somente as evidências abaixo, sem inventar dados. "
+            "Escreva como avaliador de recrutamento, sempre em terceira pessoa. "
+            "Não copie frases do currículo literalmente. Não use primeira pessoa, como "
+            "'eu', 'meu', 'fui', 'atuei', 'apliquei', 'liderei' ou 'tenho'. "
+            "Na justificativa, comece pelo nome do candidato e explique o critério de ranking "
+            "em uma frase curta, comparando aderência, senioridade, duração, cargos, projetos "
+            "ou complexidade quando houver evidência. "
             "Para cada candidato, retorne exatamente este formato, sem JSON e sem markdown:\n"
             "CANDIDATO: nome\n"
             "RESUMO: um parágrafo corrido com 3 frases curtas\n"
-            "JUSTIFICATIVA: 1 frase objetiva ligada à pergunta\n"
+            "JUSTIFICATIVA: 1 frase objetiva em português do Brasil, com no máximo 32 palavras\n"
             "FIM\n\n"
             f"Pergunta: {query}\n\n" + "\n\n".join(blocks)
         )
@@ -144,49 +175,46 @@ class SummarizationService:
         citations: list[str],
     ) -> str:
         profile = document.structured_profile
-        skills = profile.skills if profile else []
+        skills = cls._unique(profile.skills if profile else [])
         if language == "en":
             education_text = cls._sample(profile.education if profile else [], "education")
             experience_text = cls._sample(profile.experience if profile else [], "work")
             project_text = cls._sample(profile.projects if profile else [], "the resume")
-            return (
-                f"{document.candidate} has academic evidence in "
-                f"{education_text} and professional experience in {experience_text}. "
-                f"The extracted skills include {cls._join(skills[:6], 'en')}. "
-                f"Relevant projects or activities include {project_text}."
+            return " ".join(
+                [
+                    f"{document.candidate} presents a professional background from the resume.",
+                    f"Academic evidence includes {education_text}.",
+                    f"Professional experience includes {experience_text}.",
+                    f"Extracted skills include {cls._join(skills[:6], 'en')}.",
+                    f"Relevant projects or activities include {project_text}.",
+                    "The profile should be reviewed with the original resume evidence.",
+                ]
             )
         education_text = cls._sample(profile.education if profile else [], "trechos extraídos")
         experience_text = cls._sample(
             profile.experience if profile else [], "atividades profissionais"
         )
         project_text = cls._sample(profile.projects if profile else [], "evidências do currículo")
-        return (
-            f"{document.candidate} apresenta formação em {education_text} e "
-            f"experiência em {experience_text}. "
-            f"As competências extraídas incluem {cls._join(skills[:6], 'pt')}. "
-            f"Projetos ou atividades relevantes aparecem em {project_text}."
+        return " ".join(
+            [
+                f"{document.candidate} apresenta trajetória profissional descrita no currículo.",
+                f"A formação identificada inclui {education_text}.",
+                f"A experiência profissional inclui {experience_text}.",
+                f"As competências extraídas incluem {cls._join(skills[:6], 'pt')}.",
+                f"Projetos ou atividades relevantes aparecem em {project_text}.",
+                "A avaliação deve considerar as evidências originais do currículo.",
+            ]
         )
 
     @classmethod
     def _fallback_justification(cls, query: str, language: str, item: RankingEvidence) -> str:
+        del language
         if not item.citations:
-            if language == "en":
-                return f"{item.candidate} did not show strong evidence for the question: {query}."
             return f"{item.candidate} não apresentou evidências fortes para a pergunta: {query}."
-        if language == "en":
-            citation_text = cls._sample(
-                [citation.text for citation in item.citations], "relevant evidence"
-            )
-            return (
-                f"{item.candidate} was ranked for '{query}' because the retrieved citations "
-                f"mention {citation_text}."
-            )
-        citation_text = cls._sample(
-            [citation.text for citation in item.citations], "evidências relevantes"
-        )
+        citation_text = cls._evidence_summary([citation.text for citation in item.citations])
         return (
-            f"{item.candidate} foi ranqueado para '{query}' porque as citações recuperadas "
-            f"mencionam {citation_text}."
+            f"{item.candidate} se destacou para \"{query}\" porque há evidências de "
+            f"{citation_text}."
         )
 
     @staticmethod
@@ -207,9 +235,155 @@ class SummarizationService:
         clean = [" ".join(value.split())[:120] for value in values if value.strip()]
         return "; ".join(clean[:2]) if clean else fallback
 
+    @classmethod
+    def _valid_summary(cls, value: str, language: str = "pt") -> bool:
+        sentences = cls._sentences(value)
+        if not 5 <= len(sentences) <= 8:
+            return False
+        if len(value) < 120 or sum(value.count(char) for char in ".!?") < 4:
+            return False
+        if "perfil baseado nos dados extraídos" in value.casefold():
+            return False
+        return language == "en" or not cls._looks_like_english_summary(value)
+
+    @classmethod
+    def _valid_justification(cls, value: str, candidate: str) -> bool:
+        normalized = " ".join(value.split()).casefold()
+        if len(normalized) < 40:
+            return False
+        blocked = ("was ranked", "retrieved citations", "because the retrieved")
+        if any(marker in normalized for marker in blocked):
+            return False
+        contact_markers = ("@", "linkedin", "github", "telefone", "[email]", "[url]")
+        if any(marker in normalized for marker in contact_markers):
+            return False
+        first_person = (
+            " eu ",
+            " meu ",
+            " minha ",
+            " meus ",
+            " minhas ",
+            "apliquei",
+            "fui ",
+            "atuei ",
+            "contribuí",
+            "liderei",
+            "tenho ",
+            "implementei",
+            "desenvolvi",
+        )
+        padded = f" {normalized} "
+        if any(marker in padded for marker in first_person):
+            return False
+        candidate_name = cls._candidate_reference(candidate)
+        return (
+            candidate_name in normalized
+            or "candidato" in normalized
+            or "candidata" in normalized
+        )
+
+    @classmethod
+    def _evidence_summary(cls, values: list[str]) -> str:
+        categories = cls._evidence_categories(values)
+        if categories:
+            return cls._join(categories[:3], "pt")
+        snippets = cls._evidence_snippets(values)
+        if snippets:
+            return cls._join(snippets[:2], "pt")
+        return "evidências relevantes no currículo"
+
+    @classmethod
+    def _evidence_categories(cls, values: list[str]) -> list[str]:
+        text = " ".join(cls._clean_evidence_text(value).casefold() for value in values)
+        categories = []
+        checks = (
+            (
+                "experiência em desenvolvimento de sistemas",
+                ("desenvolvimento de sistemas", "software engineer", "developer"),
+            ),
+            ("atuação em backend e APIs", ("backend", "back-end", "api", "apis")),
+            (
+                "projetos de dados, pipelines ou infraestrutura",
+                ("pipeline", "airflow", "kafka", "infraestrutura", "dados"),
+            ),
+            (
+                "participação em projetos acadêmicos ou plataformas web",
+                ("acadêmic", "plataforma", "projeto", "sistemas acadêmicos"),
+            ),
+            ("uso de tecnologias relevantes para a vaga", ("python", "aws", "docker", "sql")),
+            ("liderança ou responsabilidade técnica", ("liderei", "líder", "responsável")),
+        )
+        for label, markers in checks:
+            if any(marker in text for marker in markers):
+                categories.append(label)
+        return categories
+
+    @classmethod
+    def _evidence_snippets(cls, values: list[str]) -> list[str]:
+        candidates: list[tuple[int, str]] = []
+        for value in values:
+            cleaned = cls._clean_evidence_text(value)
+            for part in re.split(r"(?<=[.!?])\s+|;\s+|•\s+", cleaned):
+                snippet = " ".join(part.split()).strip(" -–:;,.")
+                if len(snippet) < 24 or cls._looks_like_contact(snippet):
+                    continue
+                if snippet[:1].islower():
+                    continue
+                score = cls._evidence_score(snippet)
+                candidates.append((score, cls._truncate_words(snippet, 180)))
+        candidates.sort(reverse=True, key=lambda item: (item[0], len(item[1])))
+        snippets: list[str] = []
+        for _, snippet in candidates:
+            if snippet not in snippets:
+                snippets.append(snippet)
+            if len(snippets) >= 2:
+                break
+        return snippets
+
     @staticmethod
-    def _valid_summary(value: str) -> bool:
-        return len(value) >= 120 and sum(value.count(char) for char in ".!?") >= 2
+    def _clean_evidence_text(value: str) -> str:
+        value = re.sub(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", " ", value)
+        value = re.sub(r"https?://\S+", " ", value)
+        value = re.sub(r"\b(?:linkedin|github)\b\s*:?\s*\S*", " ", value, flags=re.I)
+        value = value.replace("[email]", " ").replace("[url]", " ")
+        return " ".join(value.split())
+
+    @staticmethod
+    def _looks_like_contact(value: str) -> bool:
+        lowered = value.casefold()
+        return any(marker in lowered for marker in ("@", "linkedin", "github", "telefone"))
+
+    @staticmethod
+    def _evidence_score(value: str) -> int:
+        lowered = value.casefold()
+        markers = (
+            "experiência",
+            "experience",
+            "desenvolv",
+            "backend",
+            "back-end",
+            "full-stack",
+            "lider",
+            "pipeline",
+            "sistema",
+            "projeto",
+            "escala",
+            "dados",
+        )
+        return sum(1 for marker in markers if marker in lowered)
+
+    @staticmethod
+    def _truncate_words(value: str, limit: int) -> str:
+        normalized = " ".join(value.split())
+        if len(normalized) <= limit:
+            return normalized
+        truncated = normalized[:limit].rsplit(" ", maxsplit=1)[0].rstrip(" ,;:.")
+        return f"{truncated}..."
+
+    @staticmethod
+    def _candidate_reference(candidate: str) -> str:
+        words = [word.casefold() for word in candidate.split() if len(word) >= 3]
+        return words[0] if words else candidate.casefold()
 
     @classmethod
     def _looks_like_copied_resume(cls, value: str, document: ResumeDocument) -> bool:
@@ -243,9 +417,9 @@ class SummarizationService:
         return " ".join(value.casefold().split())
 
     @staticmethod
-    def _six_line_summary(value: str) -> str:
+    def _summary_lines(value: str) -> str:
         lines = [
-            re.sub(r"^\s*(?:[-*•]|\d+[.)])\s*", "", line).strip()
+            re.sub(r"^\s*(?:[-*•]|\d+[.)])\s*", "", line).strip(" -–:;")
             for line in value.splitlines()
             if line.strip()
         ]
@@ -255,4 +429,60 @@ class SummarizationService:
                 for sentence in re.split(r"(?<=[.!?])\s+", lines[0])
                 if sentence.strip()
             ]
-        return "\n".join(lines[:6])
+        cleaned: list[str] = []
+        seen = set()
+        for line in lines:
+            line = re.sub(
+                r"^(?:resumo|perfil|formação|experiência|competências):\s*",
+                "",
+                line,
+                flags=re.I,
+            )
+            line = " ".join(line.split())
+            normalized = line.casefold()
+            if len(line) < 12 or normalized in seen:
+                continue
+            cleaned.append(line)
+            seen.add(normalized)
+            if len(cleaned) >= 8:
+                break
+        return " ".join(cleaned)
+
+    @staticmethod
+    def _normalize_language(language: str) -> str:
+        return "en" if language == "en" else "pt"
+
+    @staticmethod
+    def _unique(values: list[str]) -> list[str]:
+        unique_values = []
+        seen = set()
+        for value in values:
+            normalized = " ".join(value.split()).casefold()
+            if not normalized or normalized in seen:
+                continue
+            unique_values.append(value)
+            seen.add(normalized)
+        return unique_values
+
+    @staticmethod
+    def _looks_like_english_summary(value: str) -> bool:
+        normalized = f" {' '.join(value.casefold().split())} "
+        markers = (
+            " has academic evidence ",
+            " professional experience ",
+            " extracted skills ",
+            " relevant projects ",
+            " the resume ",
+            " work.",
+            " and ",
+            " with ",
+        )
+        return sum(1 for marker in markers if marker in normalized) >= 2
+
+    @staticmethod
+    def _sentences(value: str) -> list[str]:
+        return [
+            sentence.strip()
+            for sentence in re.split(r"(?<=[.!?])\s+", " ".join(value.split()))
+            if sentence.strip()
+        ]

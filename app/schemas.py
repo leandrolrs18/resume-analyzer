@@ -138,7 +138,9 @@ class ResumeDocument(BaseModel):
     candidate: str
     source_filename: str
     extracted_text: str
+    cache_key: str | None = None
     summary: str | None = None
+    summary_language: str | None = None
     structured_profile: ResumeStructuredProfile | None = None
     chunks: list[ResumeChunk] = Field(default_factory=list)
 

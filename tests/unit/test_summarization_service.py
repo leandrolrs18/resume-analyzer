@@ -17,8 +17,46 @@ class EchoLlm:
         )
 
 
+class RankedLlm:
+    async def generate(self, prompt: str, max_new_tokens: int) -> str:
+        del prompt, max_new_tokens
+        return (
+            "CANDIDATO: Ana\n"
+            "RESUMO: Ana atua em backend com Python e AWS. Também desenvolve APIs e "
+            "pipelines de dados. O perfil apresenta aderência para sistemas distribuídos.\n"
+            "JUSTIFICATIVA: Ana se destaca porque as evidências mostram experiência em "
+            "backend, APIs e pipelines de dados.\n"
+            "FIM"
+        )
+
+
+class FirstPersonJustificationLlm:
+    async def generate(self, prompt: str, max_new_tokens: int) -> str:
+        del prompt, max_new_tokens
+        return (
+            "CANDIDATO: Ana\n"
+            "RESUMO: Ana atua em backend com Python e AWS. Também desenvolve APIs e "
+            "pipelines de dados. O perfil apresenta aderência para sistemas distribuídos.\n"
+            "JUSTIFICATIVA: Apliquei experiência em desenvolvimento de sistemas e "
+            "aprimorando projetos acadêmicos.\n"
+            "FIM"
+        )
+
+
+class EnglishSummaryLlm:
+    async def generate(self, prompt: str, max_new_tokens: int) -> str:
+        del prompt, max_new_tokens
+        return (
+            "Ana has academic evidence in Computer Science.\n"
+            "Ana has professional experience with backend development.\n"
+            "The extracted skills include Python, AWS and Docker.\n"
+            "Relevant projects include APIs and data pipelines.\n"
+            "The resume shows strong technical experience."
+        )
+
+
 @pytest.mark.asyncio
-async def test_summary_is_short_portuguese_paragraph() -> None:
+async def test_summary_without_query_returns_portuguese_paragraph() -> None:
     service = SummarizationService(llm_service=None, max_new_tokens=120)
     document = ResumeDocument(
         candidate="Ana",
@@ -34,9 +72,34 @@ async def test_summary_is_short_portuguese_paragraph() -> None:
 
     summary = await service.summarize(document, language="pt")
 
+    sentences = [sentence for sentence in summary.split(".") if sentence.strip()]
     assert "\n" not in summary
-    assert "formação" in summary
+    assert 5 <= len(sentences) <= 8
+    assert "formação" in summary.casefold()
     assert "Python" in summary
+    assert "has academic evidence" not in summary
+    assert "perfil baseado nos dados extraídos" not in summary.casefold()
+
+
+@pytest.mark.asyncio
+async def test_summary_rejects_english_when_language_is_portuguese() -> None:
+    service = SummarizationService(llm_service=EnglishSummaryLlm(), max_new_tokens=120)
+    document = ResumeDocument(
+        candidate="Ana",
+        source_filename="ana.pdf",
+        extracted_text="Python AWS Docker",
+        structured_profile=ResumeStructuredProfile(
+            education=["Bacharelado em Computação"],
+            experience=["Backend Developer"],
+            skills=["Python", "AWS", "Docker"],
+            projects=["API project"],
+        ),
+    )
+
+    summary = await service.summarize(document, language="pt")
+
+    assert "has academic evidence" not in summary
+    assert "apresenta trajetória profissional" in summary
 
 
 @pytest.mark.asyncio
@@ -91,4 +154,72 @@ async def test_ranked_fallback_returns_justification() -> None:
     )
 
     assert "Ana" in result
-    assert "foi ranqueado" in result["Ana"]["justification"]
+    assert "se destacou" in result["Ana"]["justification"]
+    assert "was ranked" not in result["Ana"]["justification"]
+
+
+@pytest.mark.asyncio
+async def test_ranked_synthesis_uses_llm_justification_when_valid() -> None:
+    service = SummarizationService(llm_service=RankedLlm(), max_new_tokens=120)
+    document = ResumeDocument(
+        candidate="Ana",
+        source_filename="ana.pdf",
+        extracted_text="Python AWS backend APIs pipelines de dados",
+    )
+    result = await service.synthesize_ranked_results(
+        query="qual tem mais experiência?",
+        language="pt",
+        llm_provider="local",
+        evidence=[
+            RankingEvidence(
+                candidate="Ana",
+                score=1,
+                citations=[Citation(chunk_id="1", text="Experiência em backend e APIs")],
+            )
+        ],
+        documents_by_candidate={"Ana": document},
+        max_new_tokens=160,
+    )
+
+    assert result["Ana"]["justification"] == (
+        "Ana se destaca porque as evidências mostram experiência em backend, APIs e "
+        "pipelines de dados."
+    )
+
+
+@pytest.mark.asyncio
+async def test_ranked_synthesis_rejects_first_person_justification() -> None:
+    service = SummarizationService(
+        llm_service=FirstPersonJustificationLlm(),
+        max_new_tokens=120,
+    )
+    document = ResumeDocument(
+        candidate="Ana",
+        source_filename="ana.pdf",
+        extracted_text="Python AWS backend APIs pipelines de dados",
+    )
+    result = await service.synthesize_ranked_results(
+        query="qual tem mais experiência?",
+        language="pt",
+        llm_provider="local",
+        evidence=[
+            RankingEvidence(
+                candidate="Ana",
+                score=1,
+                citations=[
+                    Citation(
+                        chunk_id="1",
+                        text=(
+                            "Atuei com desenvolvimento de sistemas backend, APIs e pipelines "
+                            "de dados em infraestrutura AWS."
+                        ),
+                    )
+                ],
+            )
+        ],
+        documents_by_candidate={"Ana": document},
+        max_new_tokens=160,
+    )
+
+    assert "Apliquei" not in result["Ana"]["justification"]
+    assert "há evidências de" in result["Ana"]["justification"]
