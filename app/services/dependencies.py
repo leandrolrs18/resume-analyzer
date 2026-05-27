@@ -7,7 +7,7 @@ from app.repositories.audit_logs import AuditLogRepository
 from app.services.analyzer import ResumeAnalyzerService
 from app.services.document_service import DocumentService
 from app.services.healthcheck import HealthcheckService
-from app.services.llm_service import GroqLlmService, LlmService, XaiLlmService
+from app.services.llm_service import GeminiLlmService, LlmService
 from app.services.ocr_service import OcrService
 from app.services.ranking_service import RankingService
 from app.services.resume_parser_service import ResumeParserService
@@ -28,22 +28,16 @@ def build_container(settings: Settings) -> Container:
     audit_logs = AuditLogRepository(settings.mongo_uri, settings.mongo_db)
     ocr = OcrService()
     llm = LlmService(settings.hf_model) if settings.use_local_llm else None
-    groq = (
-        GroqLlmService(api_key=settings.groq_api_key, model=settings.groq_model)
-        if settings.groq_api_key
-        else None
-    )
-    xai = (
-        XaiLlmService(api_key=settings.xai_api_key, model=settings.xai_model)
-        if settings.xai_api_key
+    gemini = (
+        GeminiLlmService(api_key=settings.gemini_api_key, model=settings.gemini_model)
+        if settings.gemini_api_key
         else None
     )
     document_service = DocumentService(ocr, settings)
     summarization_service = SummarizationService(
         llm,
         settings.summarization_max_new_tokens,
-        groq_service=groq,
-        xai_service=xai,
+        gemini_service=gemini,
     )
     ranking_service = RankingService(settings.top_k_citations)
     resume_parser = ResumeParserService()

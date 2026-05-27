@@ -12,9 +12,8 @@ logger = logging.getLogger(__name__)
 class AuditLogRepository:
     def __init__(self, mongo_uri: str, database_name: str):
         self.enabled = True
+        self._in_memory_logs: dict[str, list[dict[str, Any]]] = {}
         try:
-            # O timeout de 500ms é ótimo para testes locais, mas para a nuvem
-            # vamos subir para 3000ms (3 segundos) para evitar falsos negativos de latência de rede.
             self.client = AsyncIOMotorClient(mongo_uri, serverSelectionTimeoutMS=3000)
             self.collection: AsyncIOMotorCollection = self.client[database_name]["audit_logs"]
         except Exception as e:
@@ -31,10 +30,6 @@ class AuditLogRepository:
         status: str,
         costs: dict[str, Any] | None = None,
     ) -> None:
-        if not self.enabled:
-            logger.warning("Log de auditoria ignorado: Repositório MongoDB desabilitado.")
-            return
-
         payload = AuditLogEntry(
             request_id=request_id,
             user_id=user_id,
@@ -45,25 +40,37 @@ class AuditLogRepository:
             costs=costs or {},
             status=status,
         )
+        serialized = payload.model_dump(mode="json")
+        if request_id not in self._in_memory_logs:
+            self._in_memory_logs[request_id] = []
+        self._in_memory_logs[request_id].append(serialized)
+
+        if not self.enabled:
+            logger.warning("Log de auditoria ignorado: Repositório MongoDB desabilitado.")
+            return
+
         try:
-            await self.collection.insert_one(payload.model_dump(mode="json"))
+            await self.collection.insert_one(serialized)
         except Exception as e:
             logger.error(f"Erro ao salvar log no MongoDB: {e}")
 
     async def get_logs(self, request_id: str) -> AuditLogResponse:
-        if not self.enabled:
-            return AuditLogResponse(request_id=request_id, logs=[])
+        if self.enabled:
+            try:
+                documents = (
+                    await self.collection.find({"request_id": request_id})
+                    .sort("timestamp", 1)
+                    .to_list(length=200)
+                )
+                if documents:
+                    logs = [AuditLogEntry.model_validate(document) for document in documents]
+                    return AuditLogResponse(request_id=request_id, logs=logs)
+            except Exception as e:
+                logger.warning(f"Failed to fetch audit logs from MongoDB, falling back to memory: {e}")
 
-        try:
-            documents = (
-                await self.collection.find({"request_id": request_id})
-                .sort("timestamp", 1)
-                .to_list(length=200)
-            )
-            logs = [AuditLogEntry.model_validate(document) for document in documents]
-            return AuditLogResponse(request_id=request_id, logs=logs)
-        except Exception:
-            return AuditLogResponse(request_id=request_id, logs=[])
+        mem_logs = self._in_memory_logs.get(request_id, [])
+        logs = [AuditLogEntry.model_validate(log) for log in mem_logs]
+        return AuditLogResponse(request_id=request_id, logs=logs)
 
     async def ping(self) -> None:
         if self.enabled:

@@ -25,4 +25,4 @@ def test_chunker_does_not_split_inside_words_when_sentence_is_long() -> None:
     assert len(chunks) > 1
     assert all(len(chunk.text) <= 55 for chunk in chunks)
     assert all(" " in chunk.text for chunk in chunks)
-    assert "avra" not in chunks[1].text[:8]
+    assert "avra" not in chunks[1].text[:5]

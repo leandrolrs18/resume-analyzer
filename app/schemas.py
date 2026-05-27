@@ -141,6 +141,7 @@ class ResumeDocument(BaseModel):
     cache_key: str | None = None
     summary: str | None = None
     summary_language: str | None = None
+    summary_provider: str | None = None
     structured_profile: ResumeStructuredProfile | None = None
     chunks: list[ResumeChunk] = Field(default_factory=list)
 

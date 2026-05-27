@@ -30,7 +30,7 @@ router = APIRouter()
                                 "request_id": "req-001",
                                 "user_id": "recrutador-demo",
                                 "query": "backend Python FastAPI Docker AWS",
-                                "llm_provider": "groq",
+                                "llm_provider": "gemini",
                                 "files": ["maria.pdf", "joao.png"],
                             },
                         },

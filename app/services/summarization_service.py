@@ -12,12 +12,10 @@ class SummarizationService:
         self,
         llm_service: Any | None,
         max_new_tokens: int,
-        groq_service: Any | None = None,
-        xai_service: Any | None = None,
+        gemini_service: Any | None = None,
     ):
         self.llm_service = llm_service
-        self.groq_service = groq_service
-        self.xai_service = xai_service
+        self.gemini_service = gemini_service
         self.max_new_tokens = max_new_tokens
 
     async def summarize(
@@ -80,24 +78,38 @@ class SummarizationService:
                 },
             )
             parsed = self._blocks(await llm.generate(prompt, max_new_tokens))
-            for candidate, item in parsed.items():
-                if candidate not in fallback:
+            for candidate_key, item in parsed.items():
+                matched_key = None
+                if candidate_key in fallback:
+                    matched_key = candidate_key
+                else:
+                    candidate_key_lower = candidate_key.lower()
+                    for f_key in fallback:
+                        f_key_lower = f_key.lower()
+                        words_f = {w for w in f_key_lower.replace("_", " ").replace("-", " ").split() if len(w) >= 3}
+                        words_c = {w for w in candidate_key_lower.replace("_", " ").replace("-", " ").split() if len(w) >= 3}
+                        ignored_words = {"cv", "pt", "en", "pdf", "desenvolvedor", "developer", "full", "stack"}
+                        words_f = {w for w in words_f if w not in ignored_words}
+                        words_c = {w for w in words_c if w not in ignored_words}
+                        if words_f & words_c:
+                            matched_key = f_key
+                            break
+                if not matched_key:
+                    logger.warning(f"Could not match LLM candidate '{candidate_key}' to any fallback key: {list(fallback.keys())}")
                     continue
                 summary = item.get("summary", "").strip()
                 if self._valid_summary(summary, language):
-                    fallback[candidate]["summary"] = summary
+                    fallback[matched_key]["summary"] = summary
                 justification = item.get("justification", "").strip()
-                if self._valid_justification(justification, candidate):
-                    fallback[candidate]["justification"] = justification
+                if self._valid_justification(justification, matched_key):
+                    fallback[matched_key]["justification"] = justification
         except Exception:
             logger.exception("single_llm_synthesis_failed")
         return fallback
 
     def _llm(self, provider: str):
-        if provider == "groq" and self.groq_service:
-            return self.groq_service
-        if provider == "xai" and self.xai_service:
-            return self.xai_service
+        if provider == "gemini" and self.gemini_service:
+            return self.gemini_service
         return self.llm_service
 
     @staticmethod
@@ -139,13 +151,13 @@ class SummarizationService:
             "Escreva como avaliador de recrutamento, sempre em terceira pessoa. "
             "Não copie frases do currículo literalmente. Não use primeira pessoa, como "
             "'eu', 'meu', 'fui', 'atuei', 'apliquei', 'liderei' ou 'tenho'. "
-            "Na justificativa, comece pelo nome do candidato e explique o critério de ranking "
-            "em uma frase curta, comparando aderência, senioridade, duração, cargos, projetos "
-            "ou complexidade quando houver evidência. "
+            "Na justificativa, comece pelo nome do candidato e explique em detalhes o critério de ranking, "
+            "comparando de forma analítica a aderência, senioridade, duração, cargos, projetos "
+            "ou complexidade quando houver evidência.\n\n"
             "Para cada candidato, retorne exatamente este formato, sem JSON e sem markdown:\n"
-            "CANDIDATO: nome\n"
+            "CANDIDATO: nome (use exatamente o identificador fornecido após 'Candidato: ')\n"
             "RESUMO: um parágrafo corrido com 3 frases curtas\n"
-            "JUSTIFICATIVA: 1 frase objetiva em português do Brasil, com no máximo 32 palavras\n"
+            "JUSTIFICATIVA: um parágrafo objetivo com 2 a 3 frases explicando detalhadamente o alinhamento do candidato\n"
             "FIM\n\n"
             f"Pergunta: {query}\n\n" + "\n\n".join(blocks)
         )

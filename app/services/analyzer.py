@@ -217,7 +217,7 @@ class ResumeAnalyzerService:
         missing = [
             document
             for document in documents
-            if not document.summary or document.summary_language != language
+            if not document.summary or document.summary_language != language or document.summary_provider != llm_provider
         ]
         summaries = await asyncio.gather(
             *(
@@ -228,16 +228,18 @@ class ResumeAnalyzerService:
         for document, summary in zip(missing, summaries, strict=False):
             document.summary = summary
             document.summary_language = language
+            document.summary_provider = llm_provider
             if document.cache_key:
                 self._document_cache[document.cache_key] = document.model_copy(deep=True)
 
         for document in documents:
-            if document.summary and document.summary_language == language:
+            if document.summary and document.summary_language == language and document.summary_provider == llm_provider:
                 continue
             cached = self._document_cache.get(document.cache_key or "")
-            if cached and cached.summary and cached.summary_language == language:
+            if cached and cached.summary and cached.summary_language == language and cached.summary_provider == llm_provider:
                 document.summary = cached.summary
                 document.summary_language = cached.summary_language
+                document.summary_provider = cached.summary_provider
 
     def _prune_document_cache(self, active_keys: set[str]) -> None:
         removed = [key for key in self._document_cache if key not in active_keys]

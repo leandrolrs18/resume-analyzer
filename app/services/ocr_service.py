@@ -1,5 +1,6 @@
 import asyncio
 from io import BytesIO
+import logging
 
 import fitz
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
@@ -11,6 +12,8 @@ except ImportError:  # pragma: no cover - exercised only in incomplete local ins
 
 from app.core.exceptions import ApplicationError
 from app.observability.metrics import OCR_FAILURES_TOTAL
+
+logger = logging.getLogger(__name__)
 
 MIN_USEFUL_OCR_CHARS = 40
 MIN_ALPHA_RATIO = 0.45
@@ -25,6 +28,37 @@ TESSERACT_CONFIGS = (
 class OcrService:
     def __init__(self, languages: str = "por+eng") -> None:
         self.languages = languages
+        self._resolved_languages = None
+
+    def _get_resolved_languages(self) -> str:
+        if self._resolved_languages is not None:
+            return self._resolved_languages
+
+        if pytesseract is None:
+            self._resolved_languages = self.languages
+            return self._resolved_languages
+
+        try:
+            available = pytesseract.get_languages()
+        except Exception as e:
+            logger.warning(f"Failed to get available Tesseract languages: {e}")
+            available = []
+
+        if available:
+            requested = [lang.strip() for lang in self.languages.split("+") if lang.strip()]
+            supported = [lang for lang in requested if lang in available]
+            if supported:
+                self._resolved_languages = "+".join(supported)
+            else:
+                if "eng" in available:
+                    self._resolved_languages = "eng"
+                else:
+                    self._resolved_languages = available[0]
+        else:
+            self._resolved_languages = self.languages
+
+        logger.info(f"Resolved OCR languages: {self._resolved_languages}")
+        return self._resolved_languages
 
     def _ocr_image_sync(self, image: Image.Image) -> str:
         if pytesseract is None:
@@ -32,14 +66,35 @@ class OcrService:
                 "Tesseract OCR dependency is not installed",
                 status_code=500,
             )
+        resolved_langs = self._get_resolved_languages()
         prepared = self._prepare_image(image)
         best_text = ""
         for config in TESSERACT_CONFIGS:
-            text = pytesseract.image_to_string(prepared, lang=self.languages, config=config).strip()
+            try:
+                text = pytesseract.image_to_string(prepared, lang=resolved_langs, config=config).strip()
+            except Exception as e:
+                logger.warning(f"OCR with config {config} failed: {e}")
+                continue
             if self._is_useful_text(text):
                 return text
             if len(text) > len(best_text):
                 best_text = text
+
+        if not self._is_useful_text(best_text):
+            logger.info("OCR on thresholded image did not yield useful text; trying grayscale fallback")
+            grayscale = ImageOps.grayscale(image)
+            grayscale = ImageOps.autocontrast(grayscale)
+            for config in TESSERACT_CONFIGS:
+                try:
+                    text = pytesseract.image_to_string(grayscale, lang=resolved_langs, config=config).strip()
+                except Exception as e:
+                    logger.warning(f"OCR fallback with config {config} failed: {e}")
+                    continue
+                if self._is_useful_text(text):
+                    return text
+                if len(text) > len(best_text):
+                    best_text = text
+
         return best_text.strip()
 
     async def extract_from_image_bytes(self, content: bytes) -> str:
