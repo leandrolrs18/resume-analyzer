@@ -10,7 +10,6 @@ from app.services.healthcheck import HealthcheckService
 from app.services.llm_service import GeminiLlmService, LlmService
 from app.services.ocr_service import OcrService
 from app.services.ranking_service import RankingService
-from app.services.resume_parser_service import ResumeParserService
 from app.services.summarization_service import SummarizationService
 
 
@@ -40,12 +39,10 @@ def build_container(settings: Settings) -> Container:
         gemini_service=gemini,
     )
     ranking_service = RankingService(settings.top_k_citations)
-    resume_parser = ResumeParserService()
     analyzer = ResumeAnalyzerService(
         document_service=document_service,
         summarization_service=summarization_service,
         ranking_service=ranking_service,
-        resume_parser=resume_parser,
         audit_logs=audit_logs,
         settings=settings,
     )

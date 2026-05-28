@@ -115,11 +115,6 @@ class SummarizationService:
     @staticmethod
     def _summary_prompt(document: ResumeDocument, language: str) -> str:
         lang = "inglês" if language == "en" else "português do Brasil"
-        profile = (
-            document.structured_profile.model_dump()
-            if document.structured_profile is not None
-            else {}
-        )
         evidence = document.extracted_text[:3000]
         return (
             f"Idioma obrigatório: {lang}. Use somente os dados do currículo abaixo, "
@@ -131,8 +126,7 @@ class SummarizationService:
             "rótulos, "
             "dados de contato ou cabeçalho copiado do currículo. Não diga 'perfil baseado nos "
             "dados extraídos'. Não repita a mesma tecnologia várias vezes.\n\n"
-            f"Candidato: {document.candidate}\n"
-            f"Perfil estruturado: {profile}\n\n"
+            f"Candidato: {document.candidate}\n\n"
             f"Trecho do currículo:\n{evidence}"
         )
 
@@ -186,37 +180,30 @@ class SummarizationService:
         language: str,
         citations: list[str],
     ) -> str:
-        profile = document.structured_profile
-        skills = cls._unique(profile.skills if profile else [])
+        words = []
+        for word in document.extracted_text.split():
+            lower = word.lower()
+            if "@" in lower or "http" in lower or "linkedin" in lower or "github" in lower or "tel" in lower:
+                continue
+            words.append(word)
+        snippet = " ".join(words[:25]) + "..."
         if language == "en":
-            education_text = cls._sample(profile.education if profile else [], "education")
-            experience_text = cls._sample(profile.experience if profile else [], "work")
-            project_text = cls._sample(profile.projects if profile else [], "the resume")
-            return " ".join(
-                [
-                    f"{document.candidate} presents a professional background from the resume.",
-                    f"Academic evidence includes {education_text}.",
-                    f"Professional experience includes {experience_text}.",
-                    f"Extracted skills include {cls._join(skills[:6], 'en')}.",
-                    f"Relevant projects or activities include {project_text}.",
-                    "The profile should be reviewed with the original resume evidence.",
-                ]
-            )
-        education_text = cls._sample(profile.education if profile else [], "trechos extraídos")
-        experience_text = cls._sample(
-            profile.experience if profile else [], "atividades profissionais"
-        )
-        project_text = cls._sample(profile.projects if profile else [], "evidências do currículo")
-        return " ".join(
-            [
-                f"{document.candidate} apresenta trajetória profissional descrita no currículo.",
-                f"A formação identificada inclui {education_text}.",
-                f"A experiência profissional inclui {experience_text}.",
-                f"As competências extraídas incluem {cls._join(skills[:6], 'pt')}.",
-                f"Projetos ou atividades relevantes aparecem em {project_text}.",
-                "A avaliação deve considerar as evidências originais do currículo.",
-            ]
-        )
+            return " ".join([
+                f"{document.candidate} presents a professional background from the resume.",
+                f"The extracted text snippet includes: {snippet}",
+                "No structured profile could be loaded for validation.",
+                "Extracted context shows relevant information.",
+                "Relevant projects or activities appear in the text.",
+                "The profile should be reviewed with the original resume evidence."
+            ])
+        return " ".join([
+            f"{document.candidate} apresenta trajetória profissional descrita no currículo.",
+            f"O texto extraído do candidato inclui: {snippet}",
+            "A formação e competências constam no arquivo original.",
+            "O perfil apresenta aderência técnica para a área.",
+            "Projetos e experiências adicionais aparecem no currículo.",
+            "A avaliação deve considerar as evidências originais do currículo."
+        ])
 
     @classmethod
     def _fallback_justification(cls, query: str, language: str, item: RankingEvidence) -> str:

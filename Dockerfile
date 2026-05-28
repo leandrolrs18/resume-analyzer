@@ -45,11 +45,7 @@ RUN pip install --no-cache-dir --user \
     "prometheus-fastapi-instrumentator>=7.0.0,<8.0.0" \
     "numpy==1.26.4" \
     "pillow>=10.4.0,<11.0.0" \
-    "llama-cpp-python>=0.2.85,<0.3.0" \
-    "spacy>=3.7.0,<4.0.0"
-
-RUN python -m spacy download pt_core_news_sm && \
-    python -m spacy download en_core_web_sm
+    "llama-cpp-python>=0.2.85,<0.3.0"
 
 COPY --chown=user app ./app
 

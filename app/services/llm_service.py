@@ -100,21 +100,6 @@ class LlmService:
             logger.exception("llm_generation_failed")
             raise
 
-    def __call__(
-        self, prompt: str, max_tokens: int, temperature: float = 0.1, stop: list[str] = None
-    ) -> dict:
-        """
-        MÁGICA DE COMPATIBILIDADE: Permite que o LlmService seja chamado diretamente
-        como uma função (ex: self.llm_service(...)), resolvendo o erro de
-        'TypeError: LlmService object is not callable' que dava no SummarizationService.
-        """
-        model = self._load_model()
-        raw_response = model(
-            prompt, max_tokens=max_tokens, temperature=temperature, stop=stop or ["<|im_end|>"]
-        )
-        return raw_response
-
-
 class GeminiLlmService:
     def __init__(self, api_key: str, model: str = "gemini-2.5-flash"):
         self.api_key = api_key

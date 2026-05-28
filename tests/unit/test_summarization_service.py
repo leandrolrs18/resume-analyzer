@@ -1,6 +1,6 @@
 import pytest
 
-from app.schemas import Citation, RankingEvidence, ResumeDocument, ResumeStructuredProfile
+from app.schemas import Citation, RankingEvidence, ResumeDocument
 from app.services.summarization_service import SummarizationService
 
 
@@ -62,12 +62,6 @@ async def test_summary_without_query_returns_portuguese_paragraph() -> None:
         candidate="Ana",
         source_filename="ana.pdf",
         extracted_text="Python AWS Docker",
-        structured_profile=ResumeStructuredProfile(
-            education=["Bacharelado em Computação"],
-            experience=["Backend Developer"],
-            skills=["Python", "AWS", "Docker"],
-            projects=["API project"],
-        ),
     )
 
     summary = await service.summarize(document, language="pt")
@@ -88,12 +82,6 @@ async def test_summary_rejects_english_when_language_is_portuguese() -> None:
         candidate="Ana",
         source_filename="ana.pdf",
         extracted_text="Python AWS Docker",
-        structured_profile=ResumeStructuredProfile(
-            education=["Bacharelado em Computação"],
-            experience=["Backend Developer"],
-            skills=["Python", "AWS", "Docker"],
-            projects=["API project"],
-        ),
     )
 
     summary = await service.summarize(document, language="pt")
@@ -116,10 +104,6 @@ async def test_summary_rejects_copied_resume_header() -> None:
             "Portfólio: Portifoliofabiosena.com.br\n"
             "RESUMO PROFISSIONAL\n"
             "Atua no desenvolvimento de interfaces web com React e TypeScript."
-        ),
-        structured_profile=ResumeStructuredProfile(
-            experience=["Desenvolvedor Front-end"],
-            skills=["React.js", "TypeScript", "Node.js", "Firebase"],
         ),
     )
 

@@ -41,16 +41,6 @@ class DocumentService:
             )
         )
 
-    async def _extract_single(self, upload: UploadFile) -> ResumeDocument:
-        content = await upload.read()
-        filename = upload.filename or "unknown"
-        self._validate_size(content, filename)
-        return await self._extract_from_content(
-            filename,
-            content,
-            self._cache_key(filename, content),
-        )
-
     async def _extract_cached(
         self,
         upload: UploadFile,

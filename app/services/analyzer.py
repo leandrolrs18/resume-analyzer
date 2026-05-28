@@ -12,7 +12,6 @@ from app.repositories.audit_logs import AuditLogRepository
 from app.schemas import AnalyzeResponse, RankingResult, SummaryResult
 from app.services.document_service import DocumentService
 from app.services.ranking_service import RankingService
-from app.services.resume_parser_service import ResumeParserService
 from app.services.summarization_service import SummarizationService
 
 logger = logging.getLogger(__name__)
@@ -24,14 +23,12 @@ class ResumeAnalyzerService:
         document_service: DocumentService,
         summarization_service: SummarizationService,
         ranking_service: RankingService,
-        resume_parser: ResumeParserService,
         audit_logs: AuditLogRepository,
         settings: Settings,
     ):
         self.document_service = document_service
         self.summarization_service = summarization_service
         self.ranking_service = ranking_service
-        self.resume_parser = resume_parser
         self.audit_logs = audit_logs
         self.settings = settings
         self.chunker = TextChunker(settings.chunk_size, settings.chunk_overlap)
@@ -159,28 +156,13 @@ class ResumeAnalyzerService:
         )
         return min(100, max(80, configured))
 
-    def _structured_chunks(self, document, start_index: int) -> list:
-        if document.structured_profile is None:
-            return []
-        chunks = []
-        semantic_views = self.resume_parser.semantic_views(
-            document.candidate, document.structured_profile
-        )
-        for offset, view in enumerate(semantic_views):
-            view_chunks = self.chunker.split(document.candidate, view)
-            for chunk_index, chunk in enumerate(view_chunks):
-                chunk.chunk_id = (
-                    f"{document.candidate}-structured-{start_index + offset}-{chunk_index}"
-                )
-            chunks.extend(view_chunks)
-        return chunks
-
     async def _prepare_documents(
         self,
         documents: list,
         llm_provider: str,
         request_id: str,
     ) -> list:
+        del llm_provider, request_id
         prepared = []
         to_process = []
         for index, document in enumerate(documents):
@@ -191,17 +173,9 @@ class ResumeAnalyzerService:
             else:
                 to_process.append((index, document))
 
-        profiles = await asyncio.gather(
-            *(
-                self.resume_parser.parse(document.extracted_text, llm_provider)
-                for _, document in to_process
-            )
-        )
-        for (index, document), profile in zip(to_process, profiles, strict=False):
-            document.structured_profile = profile
+        for index, document in to_process:
             raw_chunks = self.chunker.split(document.candidate, document.extracted_text)
-            structured_chunks = self._structured_chunks(document, len(raw_chunks))
-            document.chunks = raw_chunks + structured_chunks
+            document.chunks = raw_chunks
             if document.cache_key:
                 self._document_cache[document.cache_key] = document.model_copy(deep=True)
             prepared.append((index, document))
