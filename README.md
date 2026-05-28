@@ -1,11 +1,4 @@
----
-title: Analisador de Currículos com IA
-emoji: 📄
-colorFrom: blue
-colorTo: indigo
-sdk: docker
-pinned: false
----
+
 
 # Analisador de Currículos com IA
 
