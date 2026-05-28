@@ -52,6 +52,6 @@ async def test_ranking_understands_simple_education_query() -> None:
         ],
     )
 
-    ranked = await service.rank("quem estudou mais?", [document])
+    ranked = await service.rank("education degree", [document])
 
     assert ranked[0].score > 0

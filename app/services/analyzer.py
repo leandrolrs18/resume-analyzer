@@ -32,7 +32,6 @@ class ResumeAnalyzerService:
         self.audit_logs = audit_logs
         self.settings = settings
         self.chunker = TextChunker(settings.chunk_size, settings.chunk_overlap)
-        self._document_cache: dict[str, Any] = {}
 
     async def analyze(
         self,
@@ -51,13 +50,10 @@ class ResumeAnalyzerService:
         try:
             stage_started = time.perf_counter()
             documents = await self.document_service.extract_documents(files)
-            self._prune_document_cache(
-                {document.cache_key for document in documents if document.cache_key}
-            )
             self._log_stage("documents_extracted", stage_started, request_id)
 
             stage_started = time.perf_counter()
-            documents = await self._prepare_documents(documents, llm_provider, request_id)
+            documents = await self._prepare_documents(documents)
             self._log_stage("documents_structured_and_chunked", stage_started, request_id)
 
             if not query:
@@ -151,36 +147,14 @@ class ResumeAnalyzerService:
         )
 
     def _synthesis_max_tokens(self) -> int:
-        configured = (
+        return (
             self.settings.summarization_max_new_tokens + self.settings.justification_max_new_tokens
         )
-        return min(100, max(80, configured))
 
-    async def _prepare_documents(
-        self,
-        documents: list,
-        llm_provider: str,
-        request_id: str,
-    ) -> list:
-        del llm_provider, request_id
-        prepared = []
-        to_process = []
-        for index, document in enumerate(documents):
-            cache_key = document.cache_key
-            if cache_key and cache_key in self._document_cache:
-                cached = self._document_cache[cache_key].model_copy(deep=True)
-                prepared.append((index, cached))
-            else:
-                to_process.append((index, document))
-
-        for index, document in to_process:
-            raw_chunks = self.chunker.split(document.candidate, document.extracted_text)
-            document.chunks = raw_chunks
-            if document.cache_key:
-                self._document_cache[document.cache_key] = document.model_copy(deep=True)
-            prepared.append((index, document))
-
-        return [document for _, document in sorted(prepared, key=lambda item: item[0])]
+    async def _prepare_documents(self, documents: list) -> list:
+        for document in documents:
+            document.chunks = self.chunker.split(document.candidate, document.extracted_text)
+        return documents
 
     async def _summarize_documents(
         self,
@@ -188,34 +162,8 @@ class ResumeAnalyzerService:
         language: str,
         llm_provider: str,
     ) -> None:
-        missing = [
-            document
-            for document in documents
-            if not document.summary or document.summary_language != language or document.summary_provider != llm_provider
-        ]
-        summaries = await asyncio.gather(
-            *(
-                self.summarization_service.summarize(document, language, llm_provider)
-                for document in missing
-            )
-        )
-        for document, summary in zip(missing, summaries, strict=False):
+        for document in documents:
+            summary = await self.summarization_service.summarize(document, language, llm_provider)
             document.summary = summary
             document.summary_language = language
             document.summary_provider = llm_provider
-            if document.cache_key:
-                self._document_cache[document.cache_key] = document.model_copy(deep=True)
-
-        for document in documents:
-            if document.summary and document.summary_language == language and document.summary_provider == llm_provider:
-                continue
-            cached = self._document_cache.get(document.cache_key or "")
-            if cached and cached.summary and cached.summary_language == language and cached.summary_provider == llm_provider:
-                document.summary = cached.summary
-                document.summary_language = cached.summary_language
-                document.summary_provider = cached.summary_provider
-
-    def _prune_document_cache(self, active_keys: set[str]) -> None:
-        removed = [key for key in self._document_cache if key not in active_keys]
-        for key in removed:
-            del self._document_cache[key]

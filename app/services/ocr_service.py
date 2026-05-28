@@ -105,21 +105,7 @@ class OcrService:
             OCR_FAILURES_TOTAL.inc()
             raise
 
-    async def extract_from_pdf_bytes(self, content: bytes, max_pages: int) -> str:
-        doc = fitz.open(stream=content, filetype="pdf")
-        try:
-            page_count = min(doc.page_count, max_pages)
-            tasks = []
-            for page_index in range(page_count):
-                image = self.render_pdf_page(doc.load_page(page_index))
-                tasks.append(asyncio.to_thread(self._ocr_image_sync, image))
-            pages = await asyncio.gather(*tasks)
-            return "\n".join(filter(None, pages)).strip()
-        except Exception:
-            OCR_FAILURES_TOTAL.inc()
-            raise
-        finally:
-            doc.close()
+
 
     @staticmethod
     def render_pdf_page(page: fitz.Page) -> Image.Image:

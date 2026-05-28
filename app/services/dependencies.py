@@ -26,7 +26,7 @@ class Container:
 def build_container(settings: Settings) -> Container:
     audit_logs = AuditLogRepository(settings.mongo_uri, settings.mongo_db)
     ocr = OcrService()
-    llm = LlmService(settings.hf_model) if settings.use_local_llm else None
+    llm = LlmService() if settings.use_local_llm else None
     gemini = (
         GeminiLlmService(api_key=settings.gemini_api_key, model=settings.gemini_model)
         if settings.gemini_api_key

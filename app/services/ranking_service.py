@@ -12,31 +12,7 @@ EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 PHONE_RE = re.compile(r"\(?\d{2}\)?\s?\d?\s?\d{4}[-\s]?\d{4}")
 URL_RE = re.compile(r"https?://\S+")
 
-QUERY_ALIASES = {
-    "estud": "formação educação education university college school degree bachelor certificado",
-    "form": "formação educação education university college degree bachelor curso",
-    "educ": "formação educação education university college degree bachelor curso",
-    "exper": "experiência experience trabalho internship intern developer projetos",
-    "prepar": "experiência skills projetos software developer",
-    "backend": "backend api python django fastapi docker aws",
-    "machine": "machine learning python model neural algorithms",
-}
-SEMANTIC_GROUPS = {
-    "formacao": {
-        "formação",
-        "educação",
-        "education",
-        "university",
-        "college",
-        "school",
-        "degree",
-        "bachelor",
-        "certificado",
-        "certificate",
-    },
-    "experiencia": {"experiência", "experience", "intern", "internship", "developer", "work"},
-    "skills": {"python", "aws", "docker", "java", "react", "machine", "learning", "sql"},
-}
+# Sem tabelas de expansão estáticas para manter o código limpo e previsível.
 
 
 class RankingService:
@@ -48,7 +24,7 @@ class RankingService:
         query: str,
         documents: list[ResumeDocument],
     ) -> list[RankingEvidence]:
-        query_tokens = self._expand_query(query)
+        query_tokens = self._tokens(query)
         chunk_items = [
             (document, chunk, self._tokens(chunk.text))
             for document in documents
@@ -184,9 +160,6 @@ class RankingService:
             vector[token] += 1.0
             if len(token) >= 4:
                 vector[f"prefix:{token[:4]}"] += 0.2
-            for group_name, group_tokens in SEMANTIC_GROUPS.items():
-                if token in group_tokens:
-                    vector[f"semantic:{group_name}"] += 1.5
         return vector
 
     @staticmethod
@@ -216,15 +189,7 @@ class RankingService:
     def _initial_top_k(self, document_count: int) -> int:
         return max(self.top_k_citations, self.top_k_citations * max(1, document_count) * 2)
 
-    @classmethod
-    def _expand_query(cls, text: str) -> list[str]:
-        tokens = cls._tokens(text)
-        expanded = set(tokens)
-        for token in tokens:
-            for prefix, values in QUERY_ALIASES.items():
-                if token.startswith(prefix):
-                    expanded.update(cls._tokens(values))
-        return list(expanded)
+
 
     @staticmethod
     def _tokens(text: str) -> list[str]:

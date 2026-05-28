@@ -72,3 +72,57 @@ def test_gemini_service_invalid_response():
         mock_urlopen.return_value.__enter__.return_value = mock_response
         with pytest.raises(ValueError, match="Gemini response did not include generated text"):
             service._generate_sync("hello", 100)
+
+
+@patch("time.sleep")
+def test_gemini_service_retry_success(mock_sleep):
+    service = GeminiLlmService(api_key="fake-key")
+
+    mock_response = MagicMock()
+    mock_response.read.return_value = json.dumps({
+        "candidates": [{
+            "content": {
+                "parts": [{"text": "Success after retry!"}]
+            }
+        }]
+    }).encode("utf-8")
+
+    # First call raises 429 HTTPError, second call succeeds
+    mock_urlopen = MagicMock()
+    mock_urlopen.return_value.__enter__.side_effect = [
+        urllib.error.HTTPError("url", 429, "Too Many Requests", {}, None),
+        mock_response
+    ]
+
+    with patch("urllib.request.urlopen", mock_urlopen):
+        res = service._generate_sync("hello", 100)
+        assert res == "Success after retry!"
+        assert mock_sleep.call_count == 1
+        mock_sleep.assert_called_with(2.0)  # Initial delay
+
+
+@patch("time.sleep")
+def test_gemini_service_retry_failure(mock_sleep):
+    service = GeminiLlmService(api_key="fake-key")
+
+    # All calls raise 429 HTTPError
+    mock_urlopen = MagicMock()
+    mock_urlopen.return_value.__enter__.side_effect = [
+        urllib.error.HTTPError("url", 429, "Too Many Requests", {}, None),
+        urllib.error.HTTPError("url", 429, "Too Many Requests", {}, None),
+        urllib.error.HTTPError("url", 429, "Too Many Requests", {}, None),
+        urllib.error.HTTPError("url", 429, "Too Many Requests", {}, None),
+    ]
+
+    with patch("urllib.request.urlopen", mock_urlopen):
+        with pytest.raises(urllib.error.HTTPError) as exc_info:
+            service._generate_sync("hello", 100)
+        assert exc_info.value.code == 429
+        assert mock_sleep.call_count == 3
+        from unittest.mock import call
+        mock_sleep.assert_has_calls([
+            call(2.0),
+            call(4.0),
+            call(8.0)
+        ], any_order=False)
+

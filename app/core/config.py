@@ -5,11 +5,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    app_name: str = "resume-analyzer"
     # O Pydantic tenta ler a variável MONGO_URI do ambiente, se não achar, usa o valor padrão local
     mongo_uri: str = Field(default="mongodb://mongodb:27017")
     mongo_db: str = Field(default="resume-analyzer")
-    hf_model: str = Field(default="google/flan-t5-small")
     use_local_llm: bool = Field(default=True)
     gemini_api_key: str = Field(default="")
     gemini_model: str = Field(default="gemini-2.5-flash")

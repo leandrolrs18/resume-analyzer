@@ -130,12 +130,39 @@ class GeminiLlmService:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                data = json.loads(response.read().decode("utf-8"))
-        except Exception as e:
-            logger.error(f"Gemini API request failed: {e}")
-            raise
+        max_retries = 3
+        backoff_factor = 2.0
+        initial_delay = 2.0
+        data = None
+
+        for attempt in range(max_retries + 1):
+            try:
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    data = json.loads(response.read().decode("utf-8"))
+                break
+            except urllib.error.HTTPError as e:
+                if e.code in (429, 500, 502, 503, 504) and attempt < max_retries:
+                    delay = initial_delay * (backoff_factor ** attempt)
+                    logger.warning(
+                        f"Gemini API request failed with status {e.code}. Retrying in {delay}s (attempt {attempt + 1}/{max_retries})..."
+                    )
+                    time.sleep(delay)
+                    continue
+                logger.error(f"Gemini API request failed (status {e.code}): {e}")
+                raise
+            except Exception as e:
+                if attempt < max_retries:
+                    delay = initial_delay * (backoff_factor ** attempt)
+                    logger.warning(
+                        f"Gemini API request failed with error: {e}. Retrying in {delay}s (attempt {attempt + 1}/{max_retries})..."
+                    )
+                    time.sleep(delay)
+                    continue
+                logger.error(f"Gemini API request failed: {e}")
+                raise
+
+        if data is None:
+            raise RuntimeError("Gemini API request failed to return data")
 
         try:
             text = data["candidates"][0]["content"]["parts"][0]["text"]
