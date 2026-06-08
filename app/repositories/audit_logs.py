@@ -53,6 +53,7 @@ class AuditLogRepository:
             await self.collection.insert_one(serialized)
         except Exception as e:
             logger.error(f"Erro ao salvar log no MongoDB: {e}")
+            self.enabled = False
 
     async def get_logs(self, request_id: str) -> AuditLogResponse:
         if self.enabled:
@@ -66,7 +67,10 @@ class AuditLogRepository:
                     logs = [AuditLogEntry.model_validate(document) for document in documents]
                     return AuditLogResponse(request_id=request_id, logs=logs)
             except Exception as e:
-                logger.warning(f"Failed to fetch audit logs from MongoDB, falling back to memory: {e}")
+                logger.warning(
+                    f"Failed to fetch audit logs from MongoDB, falling back to memory: {e}"
+                )
+                self.enabled = False
 
         mem_logs = self._in_memory_logs.get(request_id, [])
         logs = [AuditLogEntry.model_validate(log) for log in mem_logs]

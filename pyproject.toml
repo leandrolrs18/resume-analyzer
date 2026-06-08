@@ -21,6 +21,8 @@ dependencies = [
   "pytesseract>=0.3.13,<1.0.0",
   "motor>=3.5.1,<4.0.0",
   "prometheus-fastapi-instrumentator>=7.0.0,<8.0.0",
+  "langchain-text-splitters>=0.3.0,<1.0.0",
+  "sentence-transformers>=3.0.0,<4.0.0",
 
   # FIX CRÍTICO (numpy 2 quebrava torch)
   "numpy==1.26.4",

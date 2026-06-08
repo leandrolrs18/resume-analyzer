@@ -26,14 +26,17 @@ class DocumentService:
     async def extract_documents(self, files: list[UploadFile]) -> list[ResumeDocument]:
         uploads = []
         for upload in files:
+            # Entrada: UploadFile do FastAPI. Aqui ele vira bytes para validação e extração.
             content = await upload.read()
             filename = upload.filename or "unknown"
             self._validate_size(content, filename)
             uploads.append((upload, content, self._cache_key(filename, content)))
 
+        # Mantém em cache somente os arquivos da requisição atual.
         active_keys = {cache_key for _, _, cache_key in uploads}
         self._prune_cache(active_keys)
 
+        # Processa os arquivos em paralelo e retorna list[ResumeDocument].
         return await asyncio.gather(
             *(
                 self._extract_cached(upload, content, cache_key)
@@ -48,6 +51,7 @@ class DocumentService:
         cache_key: str,
     ) -> ResumeDocument:
         if cache_key in self._extraction_cache:
+            # Evita reprocessar o mesmo arquivo, mas devolve cópia para não compartilhar estado.
             return self._extraction_cache[cache_key].model_copy(deep=True)
 
         filename = upload.filename or "unknown"
@@ -63,8 +67,10 @@ class DocumentService:
     ) -> ResumeDocument:
         candidate = self._candidate_name(filename)
         if filename.lower().endswith(".pdf"):
+            # PDF usa PyMuPDF: primeiro tenta texto nativo, depois OCR por página se precisar.
             extracted_text = await self._extract_pdf(content)
         else:
+            # Imagem entra direto no OCR via Tesseract.
             extracted_text = await self.ocr_service.extract_from_image_bytes(content)
         if not extracted_text.strip():
             raise ApplicationError(
@@ -72,6 +78,7 @@ class DocumentService:
                 status_code=422,
                 details={"filename": filename},
             )
+        # Saída: modelo interno com candidato, nome do arquivo, texto extraído e chave de cache.
         return ResumeDocument(
             candidate=candidate,
             source_filename=filename,
@@ -81,6 +88,7 @@ class DocumentService:
 
     async def _extract_pdf(self, content: bytes) -> str:
         try:
+            # Converte bytes do PDF em texto usando fluxo híbrido: nativo + OCR.
             return await self._extract_pdf_hybrid(content)
         except ApplicationError:
             raise
@@ -90,6 +98,12 @@ class DocumentService:
             ) from exc
 
     async def _extract_pdf_hybrid(self, content: bytes) -> str:
+        # Fluxo híbrido de PDF:
+        # 1) PyMuPDF abre o PDF em memória.
+        # 2) Se a página tem texto nativo confiável, usamos esse texto direto.
+        # 3) Se for scan/texto ruim, PyMuPDF renderiza a página como imagem.
+        # 4) A imagem vai para o Tesseract, que faz OCR e retorna texto.
+        # PyMuPDF abre o PDF em memória, sem salvar arquivo no disco.
         doc = fitz.open(stream=content, filetype="pdf")
         try:
             self._validate_pdf(doc)
@@ -100,19 +114,24 @@ class DocumentService:
 
             for page_index in range(page_count):
                 page = doc.load_page(page_index)
+                # Caminho 1: PDF nativo. PyMuPDF lê a camada de texto direto da página.
                 native_text = page.get_text("text").strip()
                 if self._is_useful_native_text(native_text):
+                    # Se o texto nativo da página parece confiável, não roda OCR.
                     page_texts.append(native_text)
                     continue
 
                 logger.info("falling_back_to_ocr_for_pdf_page", extra={"page": page_index + 1})
+                # Caminho 2: PDF escaneado/ruim. PyMuPDF renderiza a página como imagem.
                 image = self.ocr_service.render_pdf_page(page)
                 ocr_positions.append(len(page_texts))
                 page_texts.append(None)
+                # A imagem renderizada vai para o Tesseract via OcrService._ocr_image_sync.
                 ocr_tasks.append(asyncio.to_thread(self.ocr_service._ocr_image_sync, image))
 
             if ocr_tasks:
                 try:
+                    # Executa as páginas que precisam de OCR em paralelo.
                     ocr_pages = await asyncio.gather(*ocr_tasks)
                 except Exception:
                     from app.observability.metrics import OCR_FAILURES_TOTAL
@@ -120,6 +139,7 @@ class DocumentService:
                     OCR_FAILURES_TOTAL.inc()
                     raise
                 for position, text in zip(ocr_positions, ocr_pages, strict=False):
+                    # Reencaixa o texto do OCR na posição correta da página.
                     page_texts[position] = text
 
             if not ocr_tasks:
@@ -129,10 +149,12 @@ class DocumentService:
 
             return "\n".join(text.strip() for text in page_texts if text and text.strip()).strip()
         finally:
+            # Fecha o documento PyMuPDF mesmo em caso de erro.
             doc.close()
 
     @staticmethod
     def _validate_pdf(doc: fitz.Document) -> None:
+        # Bloqueia PDFs criptografados, com senha ou anexos embutidos.
         if doc.is_encrypted:
             raise ApplicationError("PDFs criptografados não são suportados", status_code=415)
         embedded_files = getattr(doc, "embfile_count", lambda: 0)()
@@ -147,6 +169,7 @@ class DocumentService:
 
     @staticmethod
     def _is_useful_native_text(text: str) -> bool:
+        # Considera texto nativo útil quando tem tamanho mínimo e proporção boa de letras.
         if len(text.strip()) < MIN_NATIVE_PAGE_CHARS:
             return False
         alpha_count = sum(character.isalpha() for character in text)
@@ -157,10 +180,12 @@ class DocumentService:
 
     @staticmethod
     def _candidate_name(filename: str) -> str:
+        # Usa o nome do arquivo como identificador inicial do candidato.
         stem = Path(filename).stem.replace("_", " ").replace("-", " ").strip()
         return stem.title() if stem else "Unknown Candidate"
 
     def _validate_size(self, content: bytes, filename: str) -> None:
+        # Protege memória/CPU limitando tamanho máximo por arquivo.
         if len(content) > self.settings.max_upload_size_bytes:
             raise ApplicationError(
                 "Uploaded file exceeds maximum allowed size",
@@ -175,5 +200,6 @@ class DocumentService:
 
     @staticmethod
     def _cache_key(filename: str, content: bytes) -> str:
+        # Hash do conteúdo evita confundir arquivos com nomes iguais.
         digest = hashlib.sha256(content).hexdigest()
         return f"{filename}:{digest}"

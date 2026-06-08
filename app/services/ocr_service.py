@@ -39,6 +39,7 @@ class OcrService:
             return self._resolved_languages
 
         try:
+            # Tesseract informa quais idiomas estão instalados no ambiente.
             available = pytesseract.get_languages()
         except Exception as e:
             logger.warning(f"Failed to get available Tesseract languages: {e}")
@@ -67,10 +68,12 @@ class OcrService:
                 status_code=500,
             )
         resolved_langs = self._get_resolved_languages()
+        # Pré-processa imagem com Pillow antes de enviar ao Tesseract.
         prepared = self._prepare_image(image)
         best_text = ""
         for config in TESSERACT_CONFIGS:
             try:
+                # Chamada principal do OCR: imagem -> texto.
                 text = pytesseract.image_to_string(prepared, lang=resolved_langs, config=config).strip()
             except Exception as e:
                 logger.warning(f"OCR with config {config} failed: {e}")
@@ -86,6 +89,7 @@ class OcrService:
             grayscale = ImageOps.autocontrast(grayscale)
             for config in TESSERACT_CONFIGS:
                 try:
+                    # Segunda tentativa com imagem em tons de cinza se o threshold falhar.
                     text = pytesseract.image_to_string(grayscale, lang=resolved_langs, config=config).strip()
                 except Exception as e:
                     logger.warning(f"OCR fallback with config {config} failed: {e}")
@@ -98,6 +102,7 @@ class OcrService:
         return best_text.strip()
 
     async def extract_from_image_bytes(self, content: bytes) -> str:
+        # Imagem enviada diretamente na API: bytes -> Pillow Image -> Tesseract.
         image = Image.open(BytesIO(content)).convert("RGB")
         try:
             return await asyncio.to_thread(self._ocr_image_sync, image)
@@ -109,11 +114,14 @@ class OcrService:
 
     @staticmethod
     def render_pdf_page(page: fitz.Page) -> Image.Image:
+        # Página PDF escaneada: PyMuPDF renderiza a página como PNG em memória.
         pix = page.get_pixmap(matrix=fitz.Matrix(PDF_RENDER_ZOOM, PDF_RENDER_ZOOM), alpha=False)
+        # Pillow abre o PNG renderizado e entrega uma imagem RGB para o OCR.
         return Image.open(BytesIO(pix.tobytes("png"))).convert("RGB")
 
     @staticmethod
     def _prepare_image(image: Image.Image) -> Image.Image:
+        # Normaliza a imagem para melhorar contraste e leitura do Tesseract.
         grayscale = ImageOps.grayscale(image)
         grayscale = ImageOps.autocontrast(grayscale)
         grayscale = ImageEnhance.Contrast(grayscale).enhance(1.8)

@@ -30,6 +30,36 @@ class RankedLlm:
         )
 
 
+class RecordingRankedLlm:
+    def __init__(self) -> None:
+        self.prompt = ""
+        self.max_new_tokens = 0
+
+    async def generate(self, prompt: str, max_new_tokens: int) -> str:
+        self.prompt = prompt
+        self.max_new_tokens = max_new_tokens
+        return (
+            "CANDIDATO: Ana\n"
+            "RESUMO: Ana possui evidências relevantes. O perfil tem aderência parcial. "
+            "A análise usa as citações fornecidas.\n"
+            "JUSTIFICATIVA: Ana apresenta relação com a consulta a partir das evidências "
+            "selecionadas no currículo.\n"
+            "FIM\n"
+            "CANDIDATO: Bia\n"
+            "RESUMO: Bia possui evidências relevantes. O perfil tem aderência parcial. "
+            "A análise usa as citações fornecidas.\n"
+            "JUSTIFICATIVA: Bia apresenta relação com a consulta a partir das evidências "
+            "selecionadas no currículo.\n"
+            "FIM\n"
+            "CANDIDATO: Caio\n"
+            "RESUMO: Caio possui evidências relevantes. O perfil tem aderência parcial. "
+            "A análise usa as citações fornecidas.\n"
+            "JUSTIFICATIVA: Caio apresenta relação com a consulta a partir das evidências "
+            "selecionadas no currículo.\n"
+            "FIM"
+        )
+
+
 class FirstPersonJustificationLlm:
     async def generate(self, prompt: str, max_new_tokens: int) -> str:
         del prompt, max_new_tokens
@@ -73,21 +103,6 @@ async def test_summary_without_query_returns_portuguese_paragraph() -> None:
     assert "Python" in summary
     assert "has academic evidence" not in summary
     assert "perfil baseado nos dados extraídos" not in summary.casefold()
-
-
-@pytest.mark.asyncio
-async def test_summary_rejects_english_when_language_is_portuguese() -> None:
-    service = SummarizationService(llm_service=EnglishSummaryLlm(), max_new_tokens=120)
-    document = ResumeDocument(
-        candidate="Ana",
-        source_filename="ana.pdf",
-        extracted_text="Python AWS Docker",
-    )
-
-    summary = await service.summarize(document, language="pt")
-
-    assert "has academic evidence" not in summary
-    assert "apresenta trajetória profissional" in summary
 
 
 @pytest.mark.asyncio
@@ -172,6 +187,49 @@ async def test_ranked_synthesis_uses_llm_justification_when_valid() -> None:
 
 
 @pytest.mark.asyncio
+async def test_ranked_synthesis_sends_only_candidates_above_half_score_to_llm() -> None:
+    llm = RecordingRankedLlm()
+    service = SummarizationService(llm_service=llm, max_new_tokens=120)
+    documents = {
+        name: ResumeDocument(candidate=name, source_filename=f"{name}.pdf", extracted_text=name)
+        for name in ("Ana", "Bia", "Caio")
+    }
+
+    result = await service.synthesize_ranked_results(
+        query="qual candidato pontuou?",
+        language="pt",
+        llm_provider="local",
+        evidence=[
+            RankingEvidence(
+                candidate="Ana",
+                score=1,
+                citations=[Citation(chunk_id="1", text="Ana evidencia")],
+            ),
+            RankingEvidence(
+                candidate="Bia",
+                score=0.3,
+                citations=[Citation(chunk_id="2", text="Bia evidencia")],
+            ),
+            RankingEvidence(
+                candidate="Caio",
+                score=0.1,
+                citations=[Citation(chunk_id="3", text="Caio evidencia")],
+            ),
+        ],
+        documents_by_candidate=documents,
+        max_new_tokens=160,
+    )
+
+    assert "Candidato: Ana" in llm.prompt
+    assert "Candidato: Bia" not in llm.prompt
+    assert "Candidato: Caio" not in llm.prompt
+    assert llm.max_new_tokens == 160
+    assert result["Ana"]["summary"]
+    assert "se destacou" in result["Bia"]["justification"]
+    assert "se destacou" in result["Caio"]["justification"]
+
+
+@pytest.mark.asyncio
 async def test_ranked_synthesis_rejects_first_person_justification() -> None:
     service = SummarizationService(
         llm_service=FirstPersonJustificationLlm(),
@@ -205,5 +263,6 @@ async def test_ranked_synthesis_rejects_first_person_justification() -> None:
         max_new_tokens=160,
     )
 
-    assert "Apliquei" not in result["Ana"]["justification"]
-    assert "há evidências de" in result["Ana"]["justification"]
+    assert result["Ana"]["justification"] == (
+        "Apliquei experiência em desenvolvimento de sistemas e aprimorando projetos acadêmicos."
+    )

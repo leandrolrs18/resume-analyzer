@@ -5,7 +5,8 @@ from app.services.ranking_service import RankingService
 
 
 @pytest.mark.asyncio
-async def test_ranking_prefers_matching_resume_and_redacts_contacts() -> None:
+async def test_ranking_prefers_matching_resume_and_redacts_contacts(monkeypatch) -> None:
+    monkeypatch.setenv("USE_CROSS_ENCODER_RERANK", "false")
     service = RankingService(top_k_citations=1)
     documents = [
         ResumeDocument(
@@ -37,7 +38,8 @@ async def test_ranking_prefers_matching_resume_and_redacts_contacts() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ranking_understands_simple_education_query() -> None:
+async def test_ranking_understands_simple_education_query(monkeypatch) -> None:
+    monkeypatch.setenv("USE_CROSS_ENCODER_RERANK", "false")
     service = RankingService(top_k_citations=1)
     document = ResumeDocument(
         candidate="Ana",
