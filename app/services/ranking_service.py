@@ -136,24 +136,18 @@ class RankingService:
         documents: list[ResumeDocument],
         scored: dict[str, list[tuple[float, Citation]]],
     ) -> list[RankingEvidence]:
-        # Agrupa as melhores citações por candidato e normaliza o score final entre 0 e 1.
-        raw_totals = []
+        results = []
         for document in documents:
             items = sorted(
                 scored.get(document.candidate, []), reverse=True, key=lambda item: item[0]
             )
-            raw_totals.append(sum(score for score, _ in items[: self.top_k_citations]))
-        max_total = max(raw_totals, default=0) or 1
-
-        results = []
-        for document, total in zip(documents, raw_totals, strict=False):
-            items = sorted(
-                scored.get(document.candidate, []), reverse=True, key=lambda item: item[0]
-            )
+            scores = [score for score, _ in items[: self.top_k_citations]]
+            # Score absoluto: usa a média das melhores citações do próprio candidato.
+            score = sum(scores) / len(scores) if scores else 0.0
             results.append(
                 RankingEvidence(
                     candidate=document.candidate,
-                    score=round(min(1, total / max_total), 4),
+                    score=round(min(1, score), 4),
                     citations=[citation for _, citation in items[: self.top_k_citations]],
                 )
             )

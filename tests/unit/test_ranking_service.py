@@ -32,7 +32,8 @@ async def test_ranking_prefers_matching_resume_and_redacts_contacts(monkeypatch)
     ranked = await service.rank("backend python aws", documents)
 
     assert ranked[0].candidate == "Ana"
-    assert ranked[0].score == 1
+    assert 0 < ranked[0].score <= 1
+    assert ranked[0].score > ranked[1].score
     assert "[email]" in ranked[0].citations[0].text
     assert "[url]" in ranked[0].citations[0].text
 
