@@ -73,6 +73,15 @@ class RankingService:
             query,
             [chunk.text for _, chunk, _ in chunk_items],
         )
+        logger.info(
+            "ranking_scores_computed",
+            extra={
+                "query": query,
+                "query_tokens": query_tokens,
+                "documents": len(documents),
+                "chunks": len(chunk_items),
+            },
+        )
 
         initial_candidates = []
         for (document, chunk, chunk_tokens), bm25_raw, semantic_score in zip(
@@ -97,12 +106,38 @@ class RankingService:
             reverse=True,
             key=lambda item: item["final_score"],
         )[: self._initial_top_k(len(documents))]
+        logger.info(
+            "ranking_top_k_initial",
+            extra={
+                "query": query,
+                "top_k_initial": [
+                    {
+                        "candidate": item["candidate"],
+                        "chunk_id": item["chunk"].chunk_id,
+                        "bm25_raw": round(item["bm25_raw"], 4),
+                        "bm25_score": round(item["bm25_score"], 4),
+                        "embedding_score": round(item["embedding_score"], 4),
+                        "final_score": round(item["final_score"], 4),
+                        "tokens_overlap": self._overlap_tokens(query_tokens, item["chunk_tokens"]),
+                    }
+                    for item in top_k_initial[:10]
+                ],
+            },
+        )
 
         # Rerank clássico: query + chunk passam juntos pelo CrossEncoder.
         rerank_scores = self._rerank_scores(
             query,
             [item["chunk"].text for item in top_k_initial],
             [item["final_score"] for item in top_k_initial],
+            [
+                {
+                    "candidate": item["candidate"],
+                    "chunk_id": item["chunk"].chunk_id,
+                    "final_score": item["final_score"],
+                }
+                for item in top_k_initial
+            ],
         )
         reranked = sorted(
             (
@@ -115,6 +150,21 @@ class RankingService:
             reverse=True,
             key=lambda item: item["rerank_score"],
         )[: self._rerank_top_n(len(documents))]
+        logger.info(
+            "ranking_reranked",
+            extra={
+                "query": query,
+                "reranked": [
+                    {
+                        "candidate": item["candidate"],
+                        "chunk_id": item["chunk"].chunk_id,
+                        "rerank_score": round(item["rerank_score"], 4),
+                        "final_score": round(item["final_score"], 4),
+                    }
+                    for item in reranked
+                ],
+            },
+        )
 
         scored: dict[str, list[tuple[float, Citation]]] = {}
         for item in reranked:
@@ -141,9 +191,20 @@ class RankingService:
             items = sorted(
                 scored.get(document.candidate, []), reverse=True, key=lambda item: item[0]
             )
-            scores = [score for score, _ in items[: self.top_k_citations]]
+            scores = [
+                self._score_or_zero(score) for score, _ in items[: self.top_k_citations]
+            ]
             # Score absoluto: usa a média das melhores citações do próprio candidato.
-            score = sum(scores) / len(scores) if scores else 0.0
+            score = self._score_or_zero(sum(scores) / len(scores)) if scores else 0.0
+            logger.info(
+                "ranking_candidate_score",
+                extra={
+                    "candidate": document.candidate,
+                    "citations": len(items[: self.top_k_citations]),
+                    "scores": [round(score, 4) for score in scores],
+                    "final_score": round(min(1, score), 4),
+                },
+            )
             results.append(
                 RankingEvidence(
                     candidate=document.candidate,
@@ -207,6 +268,7 @@ class RankingService:
         query: str,
         chunks: list[str],
         fallback_scores: list[float],
+        debug_items: list[dict[str, Any]] | None = None,
     ) -> list[float]:
         # Reranker clássico: CrossEncoder lê query + chunk juntos.
         # O modelo retorna um logit bruto, então convertemos para 0..1 antes de ranquear.
@@ -217,8 +279,46 @@ class RankingService:
         try:
             model = self._get_rerank_model()
             pairs = [(query, chunk) for chunk in chunks]
-            raw_scores = [float(score) for score in model.predict(pairs)]
-            normalized_scores = [self._sigmoid(score) for score in raw_scores]
+            raw_scores = []
+            normalized_scores = []
+            invalid_count = 0
+            for score in model.predict(pairs):
+                raw_score = float(score)
+                if not math.isfinite(raw_score):
+                    invalid_count += 1
+                    raw_scores.append(0.0)
+                    normalized_scores.append(0.0)
+                    continue
+                raw_scores.append(raw_score)
+                normalized_scores.append(self._sigmoid(raw_score))
+            if invalid_count == len(chunks):
+                logger.warning(
+                    "cross_encoder_all_scores_non_finite_using_fallback",
+                    extra={"query": query, "chunks": len(chunks)},
+                )
+                normalized_scores = [self._score_or_zero(score) for score in fallback_scores]
+            elif invalid_count:
+                logger.warning(
+                    "cross_encoder_partial_non_finite_scores_zeroed",
+                    extra={"query": query, "invalid_scores": invalid_count, "chunks": len(chunks)},
+                )
+            logger.info(
+                "ranking_cross_encoder_scores",
+                extra={
+                    "query": query,
+                    "scores": [
+                        {
+                            **(debug_items[index] if debug_items else {}),
+                            "raw_score": round(raw_score, 4),
+                            "normalized_score": round(normalized_score, 4),
+                            "text": " ".join(chunks[index].split())[:220],
+                        }
+                        for index, (raw_score, normalized_score) in enumerate(
+                            zip(raw_scores, normalized_scores, strict=False)
+                        )
+                    ],
+                },
+            )
             return normalized_scores
         except Exception:
             logger.warning("cross_encoder_rerank_unavailable", exc_info=True)
@@ -260,8 +360,18 @@ class RankingService:
         return [token.lower() for token in TOKEN_RE.findall(text)]
 
     @staticmethod
+    def _overlap_tokens(query_tokens: list[str], chunk_tokens: list[str]) -> list[str]:
+        return sorted(set(query_tokens) & set(chunk_tokens))
+
+    @staticmethod
     def _sigmoid(value: float) -> float:
+        if not math.isfinite(value):
+            return 0.0
         return 1 / (1 + math.exp(-value))
+
+    @staticmethod
+    def _score_or_zero(value: float) -> float:
+        return value if math.isfinite(value) else 0.0
 
     @staticmethod
     def _clean_citation(text: str) -> str:

@@ -41,7 +41,7 @@ MONGO_DB=resume-analyzer
 USE_LOCAL_LLM=true
 USE_CROSS_ENCODER_RERANK=true
 GEMINI_API_KEY=sua_chave_de_api_do_gemini_aqui
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3-flash-preview
 LOG_LEVEL=INFO
 ```
 *(A chave `GEMINI_API_KEY` é opcional. Se não for preenchida, o sistema utilizará apenas o modelo Qwen local).*
@@ -78,10 +78,10 @@ Abaixo estão detalhados os limites e decisões do projeto (incluindo modelos, t
 
 | Categoria | Decisão / Limite / Parâmetro | Detalhe | Justificativa / Impacto |
 | :--- | :--- | :--- | :--- |
-| **Tipos de Modelos** | Qwen2.5-0.5B-Instruct (Local)<br>Gemini 2.5 Flash (Online) | Local: GGUF via `llama-cpp-python`<br>Online: REST API com `thinkingBudget: 0` | Qwen2.5 garante privacidade offline e baixo consumo de CPU local.<br>Gemini 2.5 Flash oferece máxima velocidade e inteligência integrada com zero pensamento de rascunho. |
+| **Tipos de Modelos** | Qwen2.5-0.5B-Instruct (Local)<br>Gemini 3 Flash (Online) | Local: GGUF via `llama-cpp-python`<br>Online: REST API com `thinkingBudget: 0` | Qwen2.5 garante privacidade offline e baixo consumo de CPU local.<br>Gemini 3 Flash oferece máxima velocidade e inteligência integrada com zero pensamento de rascunho. |
 | **Temperatura do LLM** | `temperature = 0.1` | Baixa temperatura (próxima de 0) | Garante comportamento determinístico, reduz alucinações nas justificativas e foca estritamente nos dados extraídos dos currículos. |
 | **Tipo de Perguntas Suportadas** | Busca Híbrida: Léxica (BM25) + Semântica (Embeddings) + Combinação | BM25 para correspondência exata de termos/tecnologias.<br>Embeddings para similaridade semântica em memória.<br>Score Final: `0.7 * Semântico + 0.3 * Léxico` | Permite responder tanto perguntas diretas por palavras-chave/tecnologias quanto perguntas abstratas por perfil ou senioridade. |
-| **Rerank** | CrossEncoder em memória | Top evidências com score acima do corte alimentam a síntese; candidatos abaixo do corte ficam com fallback. | Melhora a precisão do ranking final sem depender de um banco vetorial externo. |
+| **Rerank** | CrossEncoder em memória | Top evidências com score acima do corte alimentam a síntese; se o reranker falhar ou devolver scores inválidos, o sistema usa o score híbrido inicial como fallback. | Melhora a precisão do ranking final sem depender de banco vetorial externo e evita que falhas numéricas do CrossEncoder zerem ou inflem os scores. |
 | **Tipo de Processos** | Pipeline em Memória & OCR Automático | PyMuPDF (PDFs nativos) + Tesseract OCR (Imagens/Scans) com fallback em tons de cinza. | Garante extração de dados de qualquer currículo sem salvar arquivos em disco, preservando a privacidade. |
 | **Parâmetros de RAG** | Chunk Size e Overlap | Chunks de 800 caracteres, Overlap de 200 caracteres | Mantém trechos maiores para preservar contexto de currículo sem perder demais a granularidade. |
 | **Limites de Entrada** | Quantidade e tamanho dos arquivos | Máximo de 10 arquivos por requisição, até 10 MB por arquivo e até 15 páginas. | Evita estouro de memória no servidor e sobrecarga de processamento por requisição concorrente. |

@@ -5,6 +5,7 @@ from app.services.ocr_service import OcrService
 from app.core.exceptions import ApplicationError
 
 
+# Verifica se o OCR aceita idiomas suportados sem alterar a configuração pedida.
 def test_ocr_service_resolves_languages_successfully():
     with patch("app.services.ocr_service.pytesseract") as mock_tesseract:
         mock_tesseract.get_languages.return_value = ["eng", "por", "osd"]
@@ -12,6 +13,7 @@ def test_ocr_service_resolves_languages_successfully():
         assert service._get_resolved_languages() == "por+eng"
 
 
+# Verifica se o OCR remove idiomas indisponíveis e mantém apenas os válidos.
 def test_ocr_service_filters_unsupported_languages():
     with patch("app.services.ocr_service.pytesseract") as mock_tesseract:
         mock_tesseract.get_languages.return_value = ["eng", "osd"]
@@ -19,6 +21,7 @@ def test_ocr_service_filters_unsupported_languages():
         assert service._get_resolved_languages() == "eng"
 
 
+# Verifica se o OCR cai para o primeiro idioma disponível quando nenhum pedido existe.
 def test_ocr_service_fallback_when_none_supported():
     with patch("app.services.ocr_service.pytesseract") as mock_tesseract:
         mock_tesseract.get_languages.return_value = ["fra", "deu"]
@@ -27,6 +30,7 @@ def test_ocr_service_fallback_when_none_supported():
         assert service._get_resolved_languages() == "fra"
 
 
+# Verifica se a camada de OCR falha de forma explícita quando o Tesseract não existe.
 def test_ocr_service_tesseract_not_installed():
     with patch("app.services.ocr_service.pytesseract", None):
         service = OcrService(languages="por+eng")
@@ -34,6 +38,7 @@ def test_ocr_service_tesseract_not_installed():
             service._ocr_image_sync(Image.new("RGB", (10, 10)))
 
 
+# Verifica o fallback para imagem em tons de cinza quando a extração normal volta vazia.
 def test_ocr_service_grayscale_fallback_on_empty_text():
     with patch("app.services.ocr_service.pytesseract") as mock_tesseract:
         service = OcrService(languages="eng")

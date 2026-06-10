@@ -5,6 +5,7 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_healthcheck(client) -> None:
+    # Confirma que a rota de saúde responde com status OK.
     response = await client.get("/healthz")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
@@ -12,6 +13,7 @@ async def test_healthcheck(client) -> None:
 
 @pytest.mark.asyncio
 async def test_analyze_without_query_returns_summaries(client) -> None:
+    # Confirma que a análise sem query retorna resumos por candidato.
     files = {"files": ("maria.pdf", io.BytesIO(b"fake"), "application/pdf")}
     data = {"request_id": "abc", "user_id": "user-1"}
 
@@ -25,6 +27,7 @@ async def test_analyze_without_query_returns_summaries(client) -> None:
 
 @pytest.mark.asyncio
 async def test_analyze_with_query_returns_ranking(client) -> None:
+    # Confirma que a análise com query retorna ranking com score e justificativa.
     files = {"files": ("maria.pdf", io.BytesIO(b"fake"), "application/pdf")}
     data = {
         "request_id": "rank-1",
@@ -45,6 +48,7 @@ async def test_analyze_with_query_returns_ranking(client) -> None:
 
 @pytest.mark.asyncio
 async def test_logs_endpoint_returns_payload(client) -> None:
+    # Confirma que a auditoria por request_id responde com o payload esperado.
     response = await client.get("/logs/abc")
 
     assert response.status_code == 200

@@ -101,7 +101,7 @@ class LlmService:
             raise
 
 class GeminiLlmService:
-    def __init__(self, api_key: str, model: str = "gemini-2.5-flash"):
+    def __init__(self, api_key: str, model: str = "gemini-3-flash-preview"):
         self.api_key = api_key
         self.model = model
 

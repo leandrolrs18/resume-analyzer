@@ -9,6 +9,7 @@ class FailingCollection:
         raise ConnectionError("mongo unavailable")
 
 
+# Garante que a auditoria continua disponível em memória quando o Mongo falha ao salvar.
 @pytest.mark.asyncio
 async def test_audit_log_falls_back_to_memory_when_mongo_save_fails() -> None:
     repository = AuditLogRepository("mongodb://localhost:27017", "resume-analyzer-test")

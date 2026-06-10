@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     mongo_db: str = Field(default="resume-analyzer")
     use_local_llm: bool = Field(default=True)
     gemini_api_key: str = Field(default="")
-    gemini_model: str = Field(default="gemini-2.5-flash")
+    gemini_model: str = Field(default="gemini-3-flash-preview")
     log_level: str = Field(default="INFO")
     max_upload_size_bytes: int = Field(default=10 * 1024 * 1024)
     max_files: int = Field(default=10)

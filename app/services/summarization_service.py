@@ -40,8 +40,25 @@ class SummarizationService:
             try:
                 # Entrada do LLM: texto extraído do currículo + instruções de estilo/segurança.
                 prompt = self._summary_prompt(document, language)
+                logger.info(
+                    "llm_summary_prompt",
+                    extra={
+                        "provider": llm_provider,
+                        "candidate": document.candidate,
+                        "max_new_tokens": max(self.max_new_tokens, 220),
+                        "prompt": prompt,
+                    },
+                )
                 # Saída esperada: um parágrafo curto de resumo, sem JSON e sem markdown.
                 generated = (await llm.generate(prompt, max(self.max_new_tokens, 220))).strip()
+                logger.info(
+                    "llm_summary_response",
+                    extra={
+                        "provider": llm_provider,
+                        "candidate": document.candidate,
+                        "response": generated,
+                    },
+                )
                 # Se o modelo copiar contato/link do currículo, descarta e mantém fallback.
                 if not self._looks_like_copied_resume(generated, document):
                     summary = generated
@@ -79,18 +96,82 @@ class SummarizationService:
         llm = self._llm(llm_provider)
         # grounded remove candidatos sem score/citação, porque o LLM só deve explicar evidência real.
         grounded = [item for item in evidence if item.score > 0 and item.citations]
+        logger.info(
+            "synthesis_grounded_candidates",
+            extra={
+                "query": query,
+                "grounded": [
+                    {
+                        "candidate": item.candidate,
+                        "score": round(item.score, 4),
+                        "citations": len(item.citations),
+                    }
+                    for item in grounded
+                ],
+            },
+        )
         if not llm or not grounded:
+            logger.info(
+                "synthesis_fallback_only",
+                extra={
+                    "reason": "no_llm_or_no_grounded_candidates",
+                    "query": query,
+                },
+            )
             return fallback
 
         try:
             # Prompt final recebe só candidatos com relevância alta; o score já veio do RankingService.
             llm_evidence = [item for item in grounded if item.score >= 0.5]
             if not llm_evidence:
+                logger.info(
+                    "synthesis_fallback_only",
+                    extra={
+                        "reason": "no_candidate_above_threshold",
+                        "threshold": 0.5,
+                        "grounded": [
+                            {
+                                "candidate": item.candidate,
+                                "score": round(item.score, 4),
+                                "citations": len(item.citations),
+                            }
+                            for item in grounded
+                        ],
+                    },
+                )
                 return fallback
             llm_candidate_names = {item.candidate for item in llm_evidence}
+            logger.info(
+                "synthesis_llm_candidates",
+                extra={
+                    "query": query,
+                    "llm_candidates": [
+                        {"candidate": item.candidate, "score": round(item.score, 4)}
+                        for item in llm_evidence
+                    ],
+                },
+            )
             prompt = self._prompt(query, language, llm_evidence)
+            logger.info(
+                "llm_ranking_prompt",
+                extra={
+                    "provider": llm_provider,
+                    "query": query,
+                    "candidates": sorted(llm_candidate_names),
+                    "max_new_tokens": max_new_tokens,
+                    "prompt": prompt,
+                },
+            )
             # LLM retorna texto em formato fixo; _blocks transforma esse texto em dict.
             raw_response = await llm.generate(prompt, max_new_tokens)
+            logger.info(
+                "llm_ranking_response",
+                extra={
+                    "provider": llm_provider,
+                    "query": query,
+                    "response": raw_response,
+                },
+            )
             parsed = self._blocks(raw_response)
             for candidate_key, item in parsed.items():
                 matched_key = candidate_key if candidate_key in fallback else None

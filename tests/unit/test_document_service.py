@@ -12,6 +12,7 @@ class StubOcrService:
         return "ocr page text"
 
 
+# Garante que PDF sem texto nativo cai para OCR e retorna o texto extraído da imagem.
 @pytest.mark.asyncio
 async def test_pdf_without_native_text_falls_back_to_ocr(monkeypatch) -> None:
     service = DocumentService(StubOcrService(), Settings())

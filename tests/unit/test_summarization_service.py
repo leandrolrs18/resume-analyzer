@@ -85,6 +85,7 @@ class EnglishSummaryLlm:
         )
 
 
+# Garante que, sem query, o serviço gera resumo em português com formato esperado.
 @pytest.mark.asyncio
 async def test_summary_without_query_returns_portuguese_paragraph() -> None:
     service = SummarizationService(llm_service=None, max_new_tokens=120)
@@ -105,6 +106,7 @@ async def test_summary_without_query_returns_portuguese_paragraph() -> None:
     assert "perfil baseado nos dados extraídos" not in summary.casefold()
 
 
+# Garante que o resumo rejeita cabeçalho copiado com contatos e links do currículo.
 @pytest.mark.asyncio
 async def test_summary_rejects_copied_resume_header() -> None:
     service = SummarizationService(llm_service=EchoLlm(), max_new_tokens=120)
@@ -129,6 +131,7 @@ async def test_summary_rejects_copied_resume_header() -> None:
     assert "competências" in summary
 
 
+# Garante que o fallback do ranking gera justificativa quando não há LLM disponível.
 @pytest.mark.asyncio
 async def test_ranked_fallback_returns_justification() -> None:
     service = SummarizationService(llm_service=None, max_new_tokens=120)
@@ -157,6 +160,7 @@ async def test_ranked_fallback_returns_justification() -> None:
     assert "was ranked" not in result["Ana"]["justification"]
 
 
+# Garante que a justificativa do LLM substitui o fallback quando o texto está válido.
 @pytest.mark.asyncio
 async def test_ranked_synthesis_uses_llm_justification_when_valid() -> None:
     service = SummarizationService(llm_service=RankedLlm(), max_new_tokens=120)
@@ -186,6 +190,7 @@ async def test_ranked_synthesis_uses_llm_justification_when_valid() -> None:
     )
 
 
+# Garante que só candidatos acima do corte entram no prompt do LLM.
 @pytest.mark.asyncio
 async def test_ranked_synthesis_sends_only_candidates_above_half_score_to_llm() -> None:
     llm = RecordingRankedLlm()
@@ -229,6 +234,7 @@ async def test_ranked_synthesis_sends_only_candidates_above_half_score_to_llm() 
     assert "se destacou" in result["Caio"]["justification"]
 
 
+# Garante que a síntese aceita a saída do LLM mesmo quando a justificativa usa primeira pessoa.
 @pytest.mark.asyncio
 async def test_ranked_synthesis_rejects_first_person_justification() -> None:
     service = SummarizationService(

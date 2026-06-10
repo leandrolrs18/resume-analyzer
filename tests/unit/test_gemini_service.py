@@ -6,8 +6,9 @@ from unittest.mock import patch, MagicMock
 from app.services.llm_service import GeminiLlmService
 
 
+# Garante que a geração síncrona monta a requisição certa e extrai o texto da resposta.
 def test_gemini_service_generate_success():
-    service = GeminiLlmService(api_key="fake-key", model="gemini-2.5-flash")
+    service = GeminiLlmService(api_key="fake-key", model="gemini-3-flash-preview")
 
     mock_response = MagicMock()
     mock_response.read.return_value = json.dumps({
@@ -27,16 +28,17 @@ def test_gemini_service_generate_success():
         # Check payload
         args, kwargs = mock_urlopen.call_args
         request_obj = args[0]
-        assert request_obj.full_url == "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=fake-key"
+        assert request_obj.full_url == "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=fake-key"
         payload = json.loads(request_obj.data.decode("utf-8"))
         assert payload["contents"][0]["parts"][0]["text"] == "hello"
         assert payload["generationConfig"]["maxOutputTokens"] == 1000
         assert payload["generationConfig"]["thinkingConfig"]["thinkingBudget"] == 0
 
 
+# Garante que a versão assíncrona usa a mesma lógica de geração da versão síncrona.
 @pytest.mark.asyncio
 async def test_gemini_service_generate_async():
-    service = GeminiLlmService(api_key="fake-key", model="gemini-2.5-flash")
+    service = GeminiLlmService(api_key="fake-key", model="gemini-3-flash-preview")
 
     mock_response = MagicMock()
     mock_response.read.return_value = json.dumps({
@@ -54,12 +56,14 @@ async def test_gemini_service_generate_async():
         assert res == "Hello, this is a response from Gemini."
 
 
+# Garante que a integração falha cedo quando a chave da API não está configurada.
 def test_gemini_service_no_api_key():
     service = GeminiLlmService(api_key="")
     with pytest.raises(RuntimeError, match="GEMINI_API_KEY não configurada"):
         service._generate_sync("hello", 100)
 
 
+# Garante que respostas sem o campo esperado do Gemini viram erro explícito.
 def test_gemini_service_invalid_response():
     service = GeminiLlmService(api_key="fake-key")
 
@@ -74,6 +78,7 @@ def test_gemini_service_invalid_response():
             service._generate_sync("hello", 100)
 
 
+# Garante que o cliente faz retry após 429 e recupera com sucesso na tentativa seguinte.
 @patch("time.sleep")
 def test_gemini_service_retry_success(mock_sleep):
     service = GeminiLlmService(api_key="fake-key")
@@ -101,6 +106,7 @@ def test_gemini_service_retry_success(mock_sleep):
         mock_sleep.assert_called_with(2.0)  # Initial delay
 
 
+# Garante que o cliente desiste após as tentativas configuradas quando o 429 persiste.
 @patch("time.sleep")
 def test_gemini_service_retry_failure(mock_sleep):
     service = GeminiLlmService(api_key="fake-key")
@@ -125,4 +131,3 @@ def test_gemini_service_retry_failure(mock_sleep):
             call(4.0),
             call(8.0)
         ], any_order=False)
-
