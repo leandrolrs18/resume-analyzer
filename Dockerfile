@@ -45,6 +45,8 @@ RUN pip install --no-cache-dir --user \
     "prometheus-fastapi-instrumentator>=7.0.0,<8.0.0" \
     "numpy==1.26.4" \
     "pillow>=10.4.0,<11.0.0" \
+    "langchain-text-splitters>=0.3.0,<1.0.0" \
+    "sentence-transformers>=3.0.0,<4.0.0" \
     "llama-cpp-python>=0.2.85,<0.3.0"
 
 COPY --chown=user app ./app
